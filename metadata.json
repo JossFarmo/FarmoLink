@@ -1,0 +1,7 @@
+{
+  "name": "FarmoLink",
+  "description": "A maior rede de farmácias online de Angola. Conectamos pacientes a farmácias em Luanda, Benguela, Huíla e demais províncias. Análise de receitas via IA e entregas rápidas.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

@@ -1,0 +1,6 @@
+quando tento criar conta, continuo com o erro: Email address "928047010@farmolink.ao" is invalid
+
+gostaria que tu implementasses todos elementos essenciais básicos para o sitema estar 
+completo e já conseguir realizar as operações que ele está destinado a realizar, 
+desde cadastrar empresas (todos os dados necessários da farmácia deve constar no formulario, 
+isso inclui NIF), adicionar registar medicamento em 
