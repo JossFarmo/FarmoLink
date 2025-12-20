@@ -1,40 +1,70 @@
 
 -- ============================================================================
--- SCRIPT DE RESET TOTAL - FARMOLINK (ATUALIZADO V6 - SUPORTE & SENHAS)
+-- SCRIPT DE ESTRUTURA COMPLETA - FARMOLINK (VERSÃO FINAL CONSOLIDADA)
 -- ============================================================================
 
--- 1. LIMPEZA
-DROP TABLE IF EXISTS support_tickets CASCADE; -- Nova tabela
+-- 1. LIMPEZA TOTAL (CUIDADO: APAGA TODOS OS DADOS)
+DROP TABLE IF EXISTS support_messages CASCADE;
+DROP TABLE IF EXISTS support_tickets CASCADE;
+DROP TABLE IF EXISTS notifications CASCADE;
 DROP TABLE IF EXISTS prescription_quotes CASCADE;
 DROP TABLE IF EXISTS prescriptions CASCADE;
 DROP TABLE IF EXISTS orders CASCADE;
 DROP TABLE IF EXISTS products CASCADE;
 DROP TABLE IF EXISTS global_products CASCADE;
+DROP TABLE IF EXISTS partners CASCADE;
+DROP TABLE IF EXISTS carousel_slides CASCADE;
 DROP TABLE IF EXISTS pharmacies CASCADE;
 DROP TABLE IF EXISTS profiles CASCADE;
 
--- 2. CRIAÇÃO DAS TABELAS
+-- 2. TABELAS DE INFRAESTRUTURA E CONTEÚDO
+CREATE TABLE carousel_slides (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  title text NOT NULL,
+  subtitle text,
+  image_url text NOT NULL,
+  button_text text DEFAULT 'Saiba Mais',
+  "order" integer DEFAULT 1,
+  created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
+);
 
--- Tabela de Farmácias
+CREATE TABLE partners (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  name text NOT NULL,
+  logo_url text NOT NULL,
+  active boolean DEFAULT true,
+  created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 3. GESTÃO DE USUÁRIOS E PARCEIROS
+CREATE TABLE profiles (
+  id uuid REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
+  name text,
+  email text,
+  phone text,
+  address text, 
+  role text DEFAULT 'CUSTOMER', -- 'CUSTOMER', 'PHARMACY', 'ADMIN'
+  pharmacy_id text, -- ID da farmácia vinculada (se for papel PHARMACY)
+  created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
 CREATE TABLE pharmacies (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   name text NOT NULL,
   nif text,
   address text,
+  phone text,
   rating numeric DEFAULT 5.0,
   delivery_fee numeric DEFAULT 0,
-  min_time text,
+  min_time text DEFAULT '30-60 min',
   is_available boolean DEFAULT false, 
-  distance text,
-  status text DEFAULT 'PENDING',
-  access_code text, 
+  status text DEFAULT 'PENDING', -- 'PENDING', 'APPROVED', 'BLOCKED'
   owner_email text, 
   commission_rate numeric DEFAULT 10, 
-  phone text, -- Contato público da farmácia
   created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Tabela de Catálogo Global (Master Data)
+-- 4. CATÁLOGO E INVENTÁRIO (STOCK)
 CREATE TABLE global_products (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   name text NOT NULL,
@@ -42,104 +72,126 @@ CREATE TABLE global_products (
   category text,
   image text DEFAULT 'https://cdn-icons-png.flaticon.com/512/883/883407.png',
   common boolean DEFAULT false,
+  reference_price numeric DEFAULT 0,
   created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Tabela de Produtos (Inventário da Farmácia)
 CREATE TABLE products (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   name text NOT NULL,
   description text,
   price numeric NOT NULL,
-  pharmacy_id text,
-  image text,
-  requires_prescription boolean DEFAULT false,
   stock numeric DEFAULT 0,
   category text DEFAULT 'Outros / Uso Especial',
-  global_product_id uuid REFERENCES global_products(id),
+  requires_prescription boolean DEFAULT false,
+  image text DEFAULT 'https://cdn-icons-png.flaticon.com/512/883/883407.png',
+  pharmacy_id uuid REFERENCES pharmacies(id) ON DELETE CASCADE,
+  global_product_id uuid REFERENCES global_products(id) ON DELETE SET NULL,
   created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Tabela de Pedidos
+-- 5. OPERAÇÕES COMERCIAIS (VENDAS E RECEITAS)
 CREATE TABLE orders (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   customer_name text,
   customer_phone text,
-  items jsonb,
+  address text,
+  items jsonb, -- Array de itens comprados
   total numeric,
   status text DEFAULT 'Pendente',
-  type text,
-  pharmacy_id text,
-  address text,
-  commission_amount numeric DEFAULT 0,
+  type text DEFAULT 'DELIVERY', -- 'DELIVERY' ou 'PICKUP'
+  pharmacy_id uuid REFERENCES pharmacies(id),
+  commission_amount numeric DEFAULT 0, -- Valor retido pela plataforma no ato da venda
   created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Tabela de Solicitações de Receita
 CREATE TABLE prescriptions (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  customer_id uuid,
-  image_url text,
-  status text DEFAULT 'Aguardando Orçamentos',
-  target_pharmacies jsonb,
+  customer_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
+  image_url text NOT NULL,
   notes text,
+  status text DEFAULT 'WAITING_FOR_QUOTES',
+  target_pharmacies jsonb, -- Array de IDs de farmácias solicitadas
   created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Tabela de Orçamentos
 CREATE TABLE prescription_quotes (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  prescription_id uuid REFERENCES prescriptions(id),
-  pharmacy_id text,
+  prescription_id uuid REFERENCES prescriptions(id) ON DELETE CASCADE,
+  pharmacy_id uuid REFERENCES pharmacies(id) ON DELETE CASCADE,
   pharmacy_name text,
   items jsonb,
-  total numeric,
-  delivery_fee numeric,
-  status text DEFAULT 'RESPONDED',
+  total numeric DEFAULT 0,
+  delivery_fee numeric DEFAULT 0,
   notes text,
+  status text DEFAULT 'RESPONDED', -- 'RESPONDED', 'REJECTED', 'ACCEPTED'
   created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Tabela de Perfis
-CREATE TABLE profiles (
-  id uuid REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
-  name text,
-  email text,
-  phone text,
-  address text, 
-  role text DEFAULT 'CUSTOMER',
-  pharmacy_id text,
-  created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
-);
-
--- NOVA TABELA: Suporte e Tickets
+-- 6. COMUNICAÇÃO E SUPORTE (SAC)
 CREATE TABLE support_tickets (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id uuid REFERENCES profiles(id),
+  user_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
   user_name text,
   user_email text,
   subject text,
   message text,
-  status text DEFAULT 'OPEN', -- OPEN, SOLVED
+  status text DEFAULT 'OPEN', -- 'OPEN', 'RESOLVED'
   created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 3. SEGURANÇA (RLS)
+CREATE TABLE support_messages (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  ticket_id uuid REFERENCES support_tickets(id) ON DELETE CASCADE,
+  sender_id uuid REFERENCES profiles(id) ON DELETE SET NULL, -- Nullable para msgs de sistema
+  sender_name text,
+  sender_role text, -- 'ADMIN' ou 'CUSTOMER'
+  message text NOT NULL,
+  created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+CREATE TABLE notifications (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
+  title text,
+  message text,
+  type text, -- 'ORDER', 'SUPPORT', 'SYSTEM'
+  is_read boolean DEFAULT false,
+  link text,
+  created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 7. POLÍTICAS DE SEGURANÇA (RLS)
+-- Nota: Para agilizar o desenvolvimento, habilitamos acesso público via anon/authenticated key.
 
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pharmacies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE global_products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE prescriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE prescription_quotes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE pharmacies ENABLE ROW LEVEL SECURITY;
-ALTER TABLE products ENABLE ROW LEVEL SECURITY;
-ALTER TABLE global_products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE support_tickets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE support_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE carousel_slides ENABLE ROW LEVEL SECURITY;
+ALTER TABLE partners ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Public Profiles" ON profiles FOR ALL USING (true);
-CREATE POLICY "Public Orders" ON orders FOR ALL USING (true);
-CREATE POLICY "Public Prescriptions" ON prescriptions FOR ALL USING (true);
-CREATE POLICY "Public Quotes" ON prescription_quotes FOR ALL USING (true);
-CREATE POLICY "Public Pharmacies" ON pharmacies FOR ALL USING (true);
-CREATE POLICY "Public Products" ON products FOR ALL USING (true);
-CREATE POLICY "Public Global Products" ON global_products FOR ALL USING (true);
-CREATE POLICY "Public Tickets" ON support_tickets FOR ALL USING (true);
+-- Criação de Políticas Gerais "Public Access"
+DO $$ 
+DECLARE
+  t text;
+BEGIN
+  FOR t IN SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' 
+  LOOP
+    EXECUTE format('DROP POLICY IF EXISTS "Allow All Access" ON %I', t);
+    EXECUTE format('CREATE POLICY "Allow All Access" ON %I FOR ALL USING (true) WITH CHECK (true)', t);
+  END LOOP;
+END $$;
+
+-- 8. ÍNDICES DE PERFORMANCE
+CREATE INDEX idx_products_pharmacy ON products(pharmacy_id);
+CREATE INDEX idx_orders_pharmacy ON orders(pharmacy_id);
+CREATE INDEX idx_support_messages_ticket ON support_messages(ticket_id);
+CREATE INDEX idx_notifications_user ON notifications(user_id);
+CREATE INDEX idx_prescriptions_customer ON prescriptions(customer_id);

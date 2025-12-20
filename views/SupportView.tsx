@@ -1,104 +1,233 @@
 
-import React, { useState } from 'react';
-import { Card, Button } from '../components/UI';
+import React, { useState, useEffect, useRef } from 'react';
+import { Card, Button, Badge } from '../components/UI';
 import { User } from '../types';
-import { createSupportTicket } from '../services/dataService';
-import { MessageCircle, Mail, HelpCircle, Send } from 'lucide-react';
+import { createSupportTicket, fetchUserTickets, fetchTicketMessages, sendTicketMessage } from '../services/dataService';
+import { MessageCircle, Mail, HelpCircle, Send, Clock, ChevronRight, X, User as UserIcon, ShieldCheck, Lock, CheckCircle } from 'lucide-react';
 import { playSound } from '../services/soundService';
 
 export const SupportView = ({ user }: { user: User }) => {
+    const [view, setView] = useState<'LIST' | 'NEW' | 'CHAT'>('LIST');
+    const [tickets, setTickets] = useState<any[]>([]);
+    const [activeTicket, setActiveTicket] = useState<any>(null);
+    const [messages, setMessages] = useState<any[]>([]);
+    const [newMessage, setNewMessage] = useState('');
+    
     const [subject, setSubject] = useState('');
-    const [message, setMessage] = useState('');
+    const [initialMessage, setInitialMessage] = useState('');
     const [loading, setLoading] = useState(false);
+    
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    useEffect(() => {
+        if (view === 'LIST') loadTickets();
+    }, [view]);
+
+    useEffect(() => {
+        if (view === 'CHAT' && activeTicket) {
+            loadMessages();
+            const interval = setInterval(loadMessages, 5000);
+            return () => clearInterval(interval);
+        }
+    }, [view, activeTicket?.id]);
+
+    useEffect(() => {
+        if (scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+    }, [messages]);
+
+    const loadTickets = async () => {
+        setLoading(true);
+        const data = await fetchUserTickets(user.id);
+        setTickets(data);
+        setLoading(false);
+    };
+
+    const loadMessages = async () => {
+        if (!activeTicket) return;
+        const data = await fetchTicketMessages(activeTicket.id);
+        setMessages(data);
+    };
+
+    const handleStartTicket = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
-        const success = await createSupportTicket(user.id, user.name, user.email, subject, message);
+        const success = await createSupportTicket(user.id, user.name, user.email, subject, initialMessage);
         setLoading(false);
-        
         if (success) {
             playSound('success');
-            alert("Sua solicitação foi enviada! Responderemos em breve por e-mail.");
+            setView('LIST');
             setSubject('');
-            setMessage('');
-        } else {
-            playSound('error');
-            alert("Erro ao enviar ticket. Tente novamente.");
+            setInitialMessage('');
         }
     };
 
-    return (
-        <div className="max-w-2xl mx-auto space-y-8 animate-fade-in pb-20">
-            <div className="text-center">
-                <div className="bg-emerald-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-emerald-600">
-                    <HelpCircle size={32} />
+    const handleSendMessage = async () => {
+        if (!newMessage.trim() || !activeTicket) return;
+        const msg = newMessage;
+        setNewMessage('');
+        const success = await sendTicketMessage(activeTicket.id, user.id, user.name, 'CUSTOMER', msg);
+        if (success) {
+            loadMessages();
+            playSound('click');
+        }
+    };
+
+    if (view === 'CHAT') {
+        const isResolved = messages.some(m => m.message.includes('---'));
+
+        return (
+            <div className="max-w-4xl mx-auto h-[80vh] flex flex-col animate-fade-in bg-white rounded-[40px] shadow-2xl border border-gray-100 overflow-hidden">
+                <div className="p-6 bg-emerald-900 text-white flex justify-between items-center shrink-0 z-10">
+                    <div className="flex items-center gap-4">
+                        <button onClick={() => setView('LIST')} className="p-2 hover:bg-white/20 rounded-full transition-colors bg-white/10" title="Voltar"><X size={20}/></button>
+                        <div>
+                            <h3 className="font-bold text-sm sm:text-base">{activeTicket.subject}</h3>
+                            <p className="text-[9px] opacity-60 uppercase tracking-widest font-black">Ticket #{activeTicket.id.slice(0,6)}</p>
+                        </div>
+                    </div>
+                    <Badge color={activeTicket.status === 'OPEN' ? 'green' : 'gray'}>
+                        {activeTicket.status === 'OPEN' ? 'ATIVO' : 'RESOLVIDO'}
+                    </Badge>
                 </div>
-                <h1 className="text-2xl font-bold text-gray-800">Como podemos ajudar?</h1>
-                <p className="text-gray-500 mt-2">Escolha a melhor forma de falar com a nossa equipe.</p>
-            </div>
+                
+                <div 
+                    ref={scrollContainerRef}
+                    className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar bg-gray-50"
+                >
+                    {messages.map((m, idx) => {
+                        const isSystem = m.message.includes('---');
+                        return (
+                            <div key={idx} className={`flex ${m.sender_role === 'ADMIN' ? 'justify-start' : 'justify-end'}`}>
+                                <div className={`max-w-[85%] p-4 rounded-3xl text-sm shadow-sm ${
+                                    isSystem ? 'mx-auto text-center bg-gray-800 text-gray-400 font-black !text-[9px] px-6 py-2 rounded-full !shadow-none' :
+                                    m.sender_role === 'ADMIN' 
+                                    ? 'bg-white text-gray-800 border-emerald-500 border-l-4 rounded-tl-none' 
+                                    : 'bg-emerald-600 text-white rounded-tr-none'
+                                }`}>
+                                    {!isSystem && (
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className="text-[9px] font-black uppercase tracking-tighter opacity-60">
+                                                {m.sender_role === 'ADMIN' ? 'Suporte FarmoLink' : 'Você'}
+                                            </span>
+                                        </div>
+                                    )}
+                                    <p className="leading-relaxed">{m.message}</p>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
 
-            <div className="grid md:grid-cols-2 gap-4">
-                <Card className="p-6 border-l-4 border-l-green-500 hover:shadow-lg transition-all cursor-pointer" onClick={() => window.open('https://wa.me/244923123456', '_blank')}>
-                    <div className="flex items-center gap-4">
-                        <div className="bg-green-100 p-3 rounded-full text-green-600">
-                            <MessageCircle size={24} />
-                        </div>
-                        <div>
-                            <h3 className="font-bold text-gray-800">WhatsApp Direto</h3>
-                            <p className="text-sm text-gray-500">Resposta imediata (08h - 18h)</p>
-                        </div>
-                    </div>
-                </Card>
-
-                <Card className="p-6 border-l-4 border-l-blue-500 hover:shadow-lg transition-all cursor-pointer" onClick={() => document.getElementById('ticket-form')?.scrollIntoView({behavior: 'smooth'})}>
-                    <div className="flex items-center gap-4">
-                        <div className="bg-blue-100 p-3 rounded-full text-blue-600">
-                            <Mail size={24} />
-                        </div>
-                        <div>
-                            <h3 className="font-bold text-gray-800">Abrir Ticket</h3>
-                            <p className="text-sm text-gray-500">Relatar problemas técnicos</p>
-                        </div>
-                    </div>
-                </Card>
-            </div>
-
-            <Card className="p-8" id="ticket-form">
-                <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2">
-                    <Mail size={20} className="text-gray-400"/> Enviar Mensagem
-                </h3>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">Assunto</label>
-                        <select className="w-full p-3 border rounded-lg bg-gray-50" value={subject} onChange={e => setSubject(e.target.value)} required>
-                            <option value="">Selecione um motivo...</option>
-                            <option value="Problema com Pedido">Problema com Pedido</option>
-                            <option value="Erro no Sistema">Erro no Sistema</option>
-                            <option value="Dúvida Financeira">Dúvida Financeira</option>
-                            <option value="Sugestão">Sugestão</option>
-                            <option value="Outros">Outros</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">Mensagem</label>
-                        <textarea 
-                            className="w-full p-3 border rounded-lg h-32" 
-                            placeholder="Descreva detalhadamente sua solicitação..." 
-                            value={message} 
-                            onChange={e => setMessage(e.target.value)}
-                            required
+                {activeTicket.status === 'OPEN' && !isResolved ? (
+                    <div className="p-6 bg-white border-t flex gap-4 shrink-0">
+                        <input 
+                            className="flex-1 p-4 bg-gray-50 border rounded-2xl outline-none focus:ring-2 focus:ring-emerald-500 transition-all text-sm"
+                            placeholder="Digite sua mensagem..."
+                            value={newMessage}
+                            onChange={e => setNewMessage(e.target.value)}
+                            onKeyPress={e => e.key === 'Enter' && handleSendMessage()}
                         />
+                        <button 
+                            onClick={handleSendMessage}
+                            className="p-4 bg-emerald-600 text-white rounded-2xl hover:bg-emerald-700 shadow-lg shadow-emerald-500/20 active:scale-95 transition-all"
+                        >
+                            <Send size={24}/>
+                        </button>
                     </div>
-                    <Button type="submit" disabled={loading} className="w-full py-3 text-lg">
-                        {loading ? 'Enviando...' : 'Enviar Solicitação'} <Send size={18} className="ml-2"/>
-                    </Button>
-                </form>
-            </Card>
-
-            <div className="text-center text-sm text-gray-400">
-                <p>Equipe FarmoLink • Luanda, Angola</p>
+                ) : (
+                    <div className="p-6 bg-emerald-50 border-t flex flex-col items-center justify-center text-emerald-800 font-black uppercase text-[10px] tracking-widest gap-2 shrink-0">
+                        <CheckCircle className="text-emerald-500" size={24}/>
+                        Este chamado foi encerrado.
+                        <button onClick={() => setView('LIST')} className="mt-2 text-emerald-600 underline">Voltar para lista</button>
+                    </div>
+                )}
             </div>
+        );
+    }
+
+    return (
+        <div className="max-w-4xl mx-auto space-y-8 animate-fade-in pb-20">
+            <div className="text-center">
+                <h1 className="text-3xl font-black text-gray-800">Centro de Ajuda</h1>
+                <p className="text-gray-500 mt-2">Estamos aqui para resolver qualquer problema com sua saúde ou pedidos.</p>
+            </div>
+
+            <div className="grid md:grid-cols-3 gap-6">
+                <Card className="md:col-span-1 p-8 border-emerald-100 flex flex-col items-center text-center">
+                    <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mb-4">
+                        <HelpCircle size={32} />
+                    </div>
+                    <h3 className="font-bold text-gray-800">Novo Chamado</h3>
+                    <p className="text-xs text-gray-400 mt-1 mb-6">Relate um problema ou dúvida técnica.</p>
+                    <Button onClick={() => setView('NEW')} className="w-full font-black">Abrir Ticket</Button>
+                </Card>
+
+                <div className="md:col-span-2 space-y-4">
+                    <h4 className="font-black text-xs uppercase tracking-widest text-gray-400 flex items-center gap-2 px-2">
+                        <Clock size={14}/> Meus Atendimentos
+                    </h4>
+                    {tickets.length === 0 && !loading ? (
+                        <div className="bg-white p-12 rounded-[40px] border border-dashed text-center flex flex-col items-center">
+                            <MessageCircle className="text-gray-200 mb-2" size={40}/>
+                            <p className="text-xs font-bold text-gray-300 uppercase">Nenhum chamado aberto</p>
+                        </div>
+                    ) : (
+                        tickets.map(t => (
+                            <div 
+                                key={t.id} 
+                                onClick={() => { setActiveTicket(t); setView('CHAT'); }}
+                                className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm hover:shadow-xl transition-all cursor-pointer flex items-center justify-between group"
+                            >
+                                <div className="flex items-center gap-4">
+                                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${t.status === 'OPEN' ? 'bg-emerald-50 text-emerald-600' : 'bg-gray-100 text-gray-400'}`}>
+                                        <MessageCircle size={24}/>
+                                    </div>
+                                    <div>
+                                        <h4 className="font-bold text-gray-800">{t.subject}</h4>
+                                        <p className="text-[10px] text-gray-400 font-bold uppercase">{new Date(t.created_at).toLocaleDateString()}</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <Badge color={t.status === 'OPEN' ? 'green' : 'gray'}>{t.status}</Badge>
+                                    <ChevronRight className="text-gray-200 group-hover:text-emerald-500 transition-colors" size={20}/>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+
+            {view === 'NEW' && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-md">
+                    <Card className="w-full max-w-lg p-8 animate-scale-in">
+                        <div className="flex justify-between items-center mb-8">
+                            <h3 className="font-black text-2xl text-gray-800">Abrir Novo Chamado</h3>
+                            <button onClick={() => setView('LIST')} className="p-2 hover:bg-gray-100 rounded-full"><X/></button>
+                        </div>
+                        <form onSubmit={handleStartTicket} className="space-y-4">
+                            <div>
+                                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Assunto</label>
+                                <select className="w-full p-4 bg-gray-50 border rounded-2xl outline-none font-bold" value={subject} onChange={e => setSubject(e.target.value)} required>
+                                    <option value="">Selecione...</option>
+                                    <option value="Problema com Pedido">Problema com Pedido</option>
+                                    <option value="Erro no Sistema">Erro no Sistema</option>
+                                    <option value="Dúvida Financeira">Dúvida Financeira</option>
+                                    <option value="Sugestão">Sugestão</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Descreva seu Problema</label>
+                                <textarea className="w-full p-4 bg-gray-50 border rounded-2xl outline-none h-32 text-sm" placeholder="Detalhes da sua solicitação..." value={initialMessage} onChange={e => setInitialMessage(e.target.value)} required />
+                            </div>
+                            <Button type="submit" disabled={loading} className="w-full py-4 font-black text-lg shadow-xl shadow-emerald-500/20">
+                                {loading ? 'Enviando...' : 'Iniciar Atendimento'}
+                            </Button>
+                        </form>
+                    </Card>
+                </div>
+            )}
         </div>
     );
 };

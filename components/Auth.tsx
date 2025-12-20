@@ -1,14 +1,82 @@
 
 import React, { useState } from 'react';
 import { UserRole, User } from '../types';
-import { signInUser, signUpUser, signUpPartner, resetPassword } from '../services/dataService';
+import { signInUser, signUpUser, signUpPartner, resetPassword, updateUserPassword } from '../services/dataService';
 import { Button } from './UI';
-import { Pill, Mail, Lock, User as UserIcon, ArrowRight, AlertTriangle, Info, ArrowLeft, Briefcase, Phone, Heart } from 'lucide-react';
+import { Mail, Lock, User as UserIcon, ArrowRight, AlertTriangle, Info, ArrowLeft, Briefcase, Phone, Heart, CheckCircle } from 'lucide-react';
 import { playSound, playWelcomeMessage } from '../services/soundService';
 
 interface AuthProps {
   onLogin: (user: User) => void;
 }
+
+const LOGO_URL = "https://res.cloudinary.com/dzvusz0u4/image/upload/v1765977310/wrzwildc1kqsq5skklio.png";
+
+// --- NOVO COMPONENTE: Tela de Definição de Nova Senha ---
+export const UpdatePasswordView: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
+    const [password, setPassword] = useState('');
+    const [confirm, setConfirm] = useState('');
+    const [loading, setLoading] = useState(false);
+
+    const handleUpdate = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if(password.length < 6) return alert("A senha deve ter no mínimo 6 caracteres");
+        if(password !== confirm) return alert("As senhas não coincidem");
+
+        setLoading(true);
+        const result = await updateUserPassword(password);
+        setLoading(false);
+
+        if(result.success) {
+            playSound('success');
+            alert("Senha atualizada com sucesso! Você já está logado.");
+            onComplete();
+        } else {
+            playSound('error');
+            alert("Erro ao atualizar senha: " + result.error);
+        }
+    }
+
+    return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 font-sans animate-fade-in">
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 text-center border border-gray-100">
+                <div className="bg-emerald-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-emerald-600">
+                    <Lock size={32}/>
+                </div>
+                <h2 className="text-2xl font-bold text-gray-800 mb-2">Definir Nova Senha</h2>
+                <p className="text-gray-500 mb-6 text-sm">Digite sua nova senha abaixo para recuperar o acesso.</p>
+                
+                <form onSubmit={handleUpdate} className="space-y-4 text-left">
+                    <div>
+                        <label className="block text-xs font-bold text-gray-500 mb-1">Nova Senha</label>
+                        <input 
+                            type="password" 
+                            required 
+                            className="w-full p-3 border rounded-xl"
+                            value={password}
+                            onChange={e => setPassword(e.target.value)}
+                            placeholder="Mínimo 6 caracteres"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-gray-500 mb-1">Confirmar Senha</label>
+                        <input 
+                            type="password" 
+                            required 
+                            className="w-full p-3 border rounded-xl"
+                            value={confirm}
+                            onChange={e => setConfirm(e.target.value)}
+                            placeholder="Repita a senha"
+                        />
+                    </div>
+                    <Button type="submit" disabled={loading} className="w-full py-3">
+                        {loading ? 'Salvando...' : 'Atualizar Senha'}
+                    </Button>
+                </form>
+            </div>
+        </div>
+    );
+};
 
 export const AuthView: React.FC<AuthProps> = ({ onLogin }) => {
   const [isLoginMode, setIsLoginMode] = useState(true);
@@ -63,7 +131,7 @@ export const AuthView: React.FC<AuthProps> = ({ onLogin }) => {
     }
 
     if (result.user) {
-      playWelcomeMessage(); // Toca a mensagem de voz: "Olá, Seja bem vindo ao FarmoLink"
+      playWelcomeMessage(result.user.name); // Passa o nome do usuário para o áudio
       onLogin(result.user);
     } else {
       playSound('error');
@@ -109,9 +177,10 @@ export const AuthView: React.FC<AuthProps> = ({ onLogin }) => {
         
         {/* Header Visual - FarmoLink Original */}
         <div className={`p-8 text-center transition-colors duration-500 ${isPartnerMode && !isLoginMode ? 'bg-blue-800' : 'bg-emerald-600'}`}>
-          <div className="flex justify-center mb-4">
-             <div className="bg-white p-3 rounded-full shadow-lg">
-                <Pill className={`h-10 w-10 ${isPartnerMode && !isLoginMode ? 'text-blue-600' : 'text-emerald-600'}`} />
+          <div className="flex justify-center mb-6">
+             {/* AUMENTADO: w-24 h-24 */}
+             <div className="bg-white p-4 rounded-3xl shadow-xl">
+                <img src={LOGO_URL} className="h-24 w-24 object-contain" alt="Logo" />
              </div>
           </div>
           <h1 className="text-3xl font-bold text-white mb-2">FarmoLink</h1>
@@ -141,7 +210,7 @@ export const AuthView: React.FC<AuthProps> = ({ onLogin }) => {
 
           {successMsg && (
             <div className="mb-4 bg-green-50 text-green-600 text-sm p-3 rounded-lg flex items-center">
-              <Info className="w-4 h-4 mr-2 flex-shrink-0" />
+              <CheckCircle className="w-4 h-4 mr-2 flex-shrink-0" />
               {successMsg}
             </div>
           )}

@@ -1,377 +1,423 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Card, Button, Badge } from '../components/UI';
+import { Search, Plus, Save, Database, Trash2, XCircle, Edit2, Download, UploadCloud, FileText, X, ArrowRight, CheckCircle2, AlertCircle, Loader2, Info, ImageIcon } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Card, Button, Badge, Toast } from '../components/UI';
 import { GlobalProduct, PRODUCT_CATEGORIES } from '../types';
-import { fetchGlobalCatalog, addGlobalProduct, seedGlobalCatalog, clearGlobalCatalog, fetchFullGlobalCatalog, bulkUpsertGlobalProducts, restoreGlobalCatalogFromBackup } from '../services/dataService';
-import { Search, Plus, Save, Database, Loader2, Tag, Trash2, AlertTriangle, RefreshCw, XCircle, ArrowRight, Download, UploadCloud, FileText } from 'lucide-react';
+import { fetchGlobalCatalog, addGlobalProduct, updateGlobalProduct, bulkDeleteGlobalProducts, bulkAddGlobalProducts, deleteGlobalProduct } from '../services/productService';
+import { processBulkImportForMasterData, ProcessedImportItem } from '../services/geminiService';
 import { playSound } from '../services/soundService';
-import { ProcessedImportItem, processBulkImportForMasterData } from '../services/geminiService';
 
 export const AdminCatalogView = () => {
     const [products, setProducts] = useState<GlobalProduct[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [loading, setLoading] = useState(false);
     const [isAdding, setIsAdding] = useState(false);
-    const [isBulkMode, setIsBulkMode] = useState(false);
-    
-    // Bulk State
+    const [isBulkAdding, setIsBulkAdding] = useState(false);
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [bulkText, setBulkText] = useState('');
-    const [previewItems, setPreviewItems] = useState<ProcessedImportItem[]>([]);
-    const [isReviewing, setIsReviewing] = useState(false);
+    const [processedItems, setProcessedItems] = useState<ProcessedImportItem[]>([]);
+    const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
 
-    // Backup Restore State
-    const fileInputRef = useRef<HTMLInputElement>(null);
-
-    const [newProduct, setNewProduct] = useState({
-        name: '', description: '', category: PRODUCT_CATEGORIES[0], image: '', common: true
+    const [fields, setFields] = useState({
+        name: '',
+        category: PRODUCT_CATEGORIES[0],
+        description: '',
+        referencePrice: 0,
+        image: ''
     });
 
-    useEffect(() => {
-        loadCatalog();
-    }, [searchTerm]);
+    useEffect(() => { loadCatalog(); }, [searchTerm]);
 
     const loadCatalog = async () => {
         setLoading(true);
-        const data = await fetchGlobalCatalog(searchTerm);
-        setProducts(data);
-        setLoading(false);
-    }
-
-    const resetForms = () => {
-        setIsAdding(false);
-        setIsBulkMode(false);
-        setIsReviewing(false);
-        setPreviewItems([]);
-        setBulkText('');
-        setNewProduct({ name: '', description: '', category: PRODUCT_CATEGORIES[0], image: '', common: true });
-    }
-
-    const handleAdd = async () => {
-        if(!newProduct.name) return alert("Nome é obrigatório");
-        setLoading(true);
-        const success = await addGlobalProduct(newProduct);
-        if(success) {
-            playSound('save');
-            resetForms();
-            loadCatalog();
-        } else {
-            playSound('error');
-            alert("Erro ao adicionar");
-        }
-        setLoading(false);
-    }
-
-    // --- BACKUP & RESTORE ---
-    const handleExportBackup = async () => {
-        setLoading(true);
         try {
-            const allData = await fetchFullGlobalCatalog();
-            const jsonString = JSON.stringify(allData, null, 2);
-            const blob = new Blob([jsonString], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `farmolink_global_catalog_backup_${new Date().toISOString().split('T')[0]}.json`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            playSound('success');
-            alert(`Backup gerado com sucesso! ${allData.length} itens exportados.`);
+            const data = await fetchGlobalCatalog(searchTerm);
+            setProducts(data);
         } catch (e) {
-            console.error(e);
-            alert("Erro ao gerar backup.");
-        }
-        setLoading(false);
-    }
-
-    const handleImportBackupClick = () => {
-        fileInputRef.current?.click();
-    }
-
-    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if(!file) return;
-
-        if(!confirm("Tem certeza? Isso irá restaurar/adicionar produtos do arquivo selecionado ao banco de dados.")) return;
-
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-            try {
-                const json = JSON.parse(event.target?.result as string);
-                if(Array.isArray(json)) {
-                    setLoading(true);
-                    const success = await restoreGlobalCatalogFromBackup(json);
-                    if(success) {
-                        playSound('success');
-                        alert("Catálogo restaurado com sucesso!");
-                        loadCatalog();
-                    } else {
-                        alert("Erro ao restaurar catálogo. Verifique o console.");
-                    }
-                    setLoading(false);
-                } else {
-                    alert("Arquivo inválido. O formato deve ser um array JSON de produtos.");
-                }
-            } catch (err) {
-                alert("Erro ao ler arquivo JSON.");
-            }
-        };
-        reader.readAsText(file);
-        // Reset input value to allow selecting same file again
-        e.target.value = '';
-    }
-
-
-    // --- BULK OPERATIONS ---
-    const handleAnalyzeBulk = async () => {
-        if(!bulkText.trim()) return;
-        setLoading(true);
-        // Busca catálogo inteiro para comparação
-        const allCatalog = await fetchFullGlobalCatalog();
-        const analyzed = await processBulkImportForMasterData(bulkText, allCatalog);
-        setPreviewItems(analyzed);
-        setIsReviewing(true);
-        setLoading(false);
-    }
-
-    const updatePreviewItem = (index: number, field: keyof ProcessedImportItem, value: any) => {
-        const newItems = [...previewItems];
-        newItems[index] = { ...newItems[index], [field]: value };
-        setPreviewItems(newItems);
-    }
-
-    const toggleAction = (index: number) => {
-        const newItems = [...previewItems];
-        newItems[index].action = newItems[index].action === 'CREATE' ? 'IGNORE' : 'CREATE';
-        setPreviewItems(newItems);
-    }
-
-    const removePreviewItem = (index: number) => {
-        const newItems = previewItems.filter((_, i) => i !== index);
-        setPreviewItems(newItems);
-    }
-
-    const handleConfirmImport = async () => {
-        const itemsToSync = previewItems.filter(i => i.action === 'CREATE');
-        if(itemsToSync.length === 0) {
-            alert("Nenhum item novo para adicionar.");
-            return;
-        }
-        setLoading(true);
-        const success = await bulkUpsertGlobalProducts(itemsToSync);
-        setLoading(false);
-        if(success) {
-            playSound('success');
-            alert(`Sucesso! ${itemsToSync.length} novos itens adicionados ao Mestre.`);
-            resetForms();
-            loadCatalog();
-        } else {
-            playSound('error');
-            alert("Erro ao importar produtos.");
-        }
-    }
-
-    const handleSeed = async () => {
-        if(confirm("Isso irá adicionar centenas de medicamentos padrão ao banco de dados. Continuar?")) {
-            setLoading(true);
-            const msg = await seedGlobalCatalog();
-            alert(msg);
-            loadCatalog();
+            console.error("Erro ao carregar catálogo:", e);
+        } finally {
             setLoading(false);
         }
     }
 
-    const handleClear = async () => {
-        const confirm1 = confirm("PERIGO: Você tem certeza que deseja APAGAR TODO O CATÁLOGO GLOBAL?");
-        if (confirm1) {
-            const verification = prompt("Para confirmar, digite a palavra DELETAR abaixo:");
-            if (verification === 'DELETAR') {
-                setLoading(true);
-                const success = await clearGlobalCatalog();
-                if(success) {
-                    playSound('trash');
-                    alert("Catálogo limpo com sucesso.");
-                    loadCatalog();
-                } else {
-                    alert("Erro ao limpar catálogo.");
-                }
-                setLoading(false);
+    const handleSave = async () => {
+        if(!fields.name) return setToast({msg: "Nome é obrigatório", type: 'error'});
+
+        setLoading(true);
+        const payload = {
+            name: fields.name,
+            description: fields.description || fields.name,
+            category: fields.category,
+            image: fields.image || 'https://cdn-icons-png.flaticon.com/512/883/883407.png',
+            common: true,
+            referencePrice: fields.referencePrice
+        };
+
+        const result = editingId ? await updateGlobalProduct(editingId, payload) : await addGlobalProduct(payload);
+        setLoading(false);
+        
+        if(result.success) {
+            playSound('save');
+            setToast({msg: "Catálogo Atualizado!", type: 'success'});
+            cancelEdit();
+            loadCatalog();
+        } else {
+            playSound('error');
+            setToast({msg: `Erro: ${result.error}`, type: 'error'});
+        }
+    }
+
+    const handleDeleteSingle = async (e: React.MouseEvent, id: string) => {
+        if (e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        
+        if (!window.confirm("ATENÇÃO: Deseja excluir este item permanentemente do catálogo mestre?")) {
+            return;
+        }
+        
+        setLoading(true);
+        try {
+            const result = await deleteGlobalProduct(id);
+            if (result.success) {
+                playSound('trash');
+                setToast({msg: "Produto removido!", type: 'success'});
+                setSelectedIds(prev => {
+                    const next = new Set(prev);
+                    next.delete(id);
+                    return next;
+                });
+                await loadCatalog();
             } else {
-                alert("Ação cancelada. A palavra de verificação estava incorreta.");
+                playSound('error');
+                const isForeignKeyError = result.error?.includes('foreign key');
+                setToast({
+                    msg: isForeignKeyError 
+                        ? "Este produto está em uso por farmácias e não pode ser removido." 
+                        : "Erro ao excluir: " + result.error,
+                    type: 'error'
+                });
             }
+        } catch (err: any) {
+            console.error("Erro fatal na exclusão:", err);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.size === 0) return;
+
+        if (!confirm(`ATENÇÃO: Deseja excluir permanentemente os ${selectedIds.size} produtos selecionados do catálogo mestre?`)) {
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const result = await bulkDeleteGlobalProducts(Array.from(selectedIds));
+            
+            if (result.success) {
+                playSound('trash');
+                setToast({ msg: `${selectedIds.size} produtos removidos com sucesso!`, type: 'success' });
+                setSelectedIds(new Set());
+                await loadCatalog();
+            } else {
+                playSound('error');
+                const isForeignKeyError = result.error?.includes('foreign key');
+                setToast({
+                    msg: isForeignKeyError 
+                        ? "Alguns produtos selecionados estão vinculados a farmácias e não puderam ser excluídos." 
+                        : "Erro na exclusão em massa: " + result.error,
+                    type: 'error'
+                });
+                await loadCatalog();
+            }
+        } catch (err) {
+            setToast({ msg: "Erro de conexão ao processar exclusão.", type: 'error' });
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    const startEdit = (e: React.MouseEvent, p: GlobalProduct) => {
+        if (e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        setEditingId(p.id);
+        setIsAdding(true);
+        setFields({
+            name: p.name,
+            category: p.category,
+            description: p.description,
+            referencePrice: p.referencePrice || 0,
+            image: p.image || ''
+        });
+    }
+
+    const toggleSelect = (id: string) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    }
+
+    const toggleSelectAll = () => {
+        if (selectedIds.size === products.length) {
+            setSelectedIds(new Set());
+        } else {
+            setSelectedIds(new Set(products.map(p => p.id)));
+        }
+    }
+
+    const cancelEdit = () => {
+        setEditingId(null); 
+        setIsAdding(false); 
+        setIsBulkAdding(false);
+        setProcessedItems([]);
+        setBulkText('');
+        setFields({ name: '', category: PRODUCT_CATEGORIES[0], description: '', referencePrice: 0, image: '' });
+    }
+
+    const handleAnalyzeBulk = async () => {
+        if (!bulkText.trim()) return;
+        setLoading(true);
+        const items = await processBulkImportForMasterData(bulkText);
+        setProcessedItems(items);
+        setLoading(false);
+        playSound('click');
+    }
+
+    const handleSaveBulk = async () => {
+        if (processedItems.length === 0) return;
+        setLoading(true);
+        const productsToAdd = processedItems.map(item => ({
+            name: item.name,
+            description: item.description,
+            category: item.category,
+            image: 'https://cdn-icons-png.flaticon.com/512/883/883407.png',
+            common: true,
+            referencePrice: item.referencePrice || 0
+        }));
+
+        const success = await bulkAddGlobalProducts(productsToAdd);
+        setLoading(false);
+
+        if (success) {
+            playSound('success');
+            setToast({msg: `${processedItems.length} produtos importados!`, type: 'success'});
+            cancelEdit();
+            loadCatalog();
+        } else {
+            playSound('error');
+            setToast({msg: "Erro na importação em massa", type: 'error'});
         }
     }
 
     return (
-        <div className="space-y-6 animate-fade-in">
-             {/* Hidden file input for restore */}
-             <input type="file" ref={fileInputRef} accept=".json" className="hidden" onChange={handleFileChange} />
-
-             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div>
-                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2"><Database className="text-emerald-600"/> Catálogo Global (Master Data)</h2>
-                    <p className="text-sm text-gray-500">Base de dados unificada. Use o backup regularmente.</p>
+        <div className="space-y-6 animate-fade-in pb-10">
+            {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
+            
+            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-white p-6 rounded-3xl border border-gray-100 shadow-sm gap-4">
+                <div className="flex items-center gap-3">
+                    <div className="p-3 bg-emerald-100 text-emerald-600 rounded-2xl">
+                        <Database size={24}/>
+                    </div>
+                    <div>
+                        <h2 className="text-xl font-black text-gray-800">Catálogo Global (Master Data)</h2>
+                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Base de dados unificada. Use o registro rápido para volume.</p>
+                    </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                    <Button variant="danger" onClick={handleClear} title="Apagar tudo (Requer Senha)" className="!p-2 bg-red-100 text-red-600 border border-red-200 hover:bg-red-200">
-                         <Trash2 size={16}/>
-                    </Button>
-                    <div className="w-px h-8 bg-gray-300 mx-1"></div>
-                    <Button variant="secondary" onClick={handleExportBackup} title="Baixar Backup (JSON)" className="!p-2 flex items-center gap-2">
-                         <Download size={16}/> <span className="hidden md:inline">Backup</span>
-                    </Button>
-                    <Button variant="secondary" onClick={handleImportBackupClick} title="Restaurar Backup" className="!p-2 flex items-center gap-2">
-                         <UploadCloud size={16}/> <span className="hidden md:inline">Restaurar</span>
-                    </Button>
-                    <div className="w-px h-8 bg-gray-300 mx-1"></div>
-                    <Button variant="outline" onClick={() => { resetForms(); setIsBulkMode(true); }} className="text-xs">
-                        <FileText size={16} className="mr-1"/> Importar Texto
-                    </Button>
-                    <Button onClick={() => { resetForms(); setIsAdding(true); }} className="text-xs">
-                        <Plus size={16} className="mr-1"/> Novo
-                    </Button>
-                </div>
-             </div>
-
-             {/* MODO IMPORTAÇÃO EM MASSA (CÓPIA DA FARMÁCIA) */}
-             {isBulkMode && (
-                <Card className="border-t-4 border-indigo-500 animate-fade-in bg-indigo-50">
-                    <div className="flex justify-between items-start mb-4">
-                        <div>
-                            <h3 className="font-bold text-lg text-indigo-900">Registro Rápido (Master Data)</h3>
-                            <p className="text-sm text-indigo-700">Cole a lista de medicamentos. O sistema irá inferir as categorias.</p>
-                        </div>
-                        <button onClick={resetForms}><XCircle className="text-indigo-300 hover:text-indigo-500"/></button>
+                
+                <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+                    <div className="relative flex-1 lg:flex-none">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16}/>
+                        <input 
+                            placeholder="Pesquisar catálogo..." 
+                            className="pl-10 pr-4 py-2 bg-gray-50 border rounded-xl text-sm w-full lg:w-64 outline-none focus:ring-2 focus:ring-emerald-500"
+                            value={searchTerm}
+                            onChange={e => setSearchTerm(e.target.value)}
+                        />
                     </div>
                     
-                    {!isReviewing ? (
-                        <>
-                            <textarea 
-                                className="w-full p-4 rounded-lg border border-indigo-200 h-48 focus:ring-2 focus:ring-indigo-400 font-mono text-sm"
-                                placeholder={`Exemplo:\nParacetamol 500mg\nAmoxicilina 500mg\nDipirona Gotas`}
-                                value={bulkText}
-                                onChange={e => setBulkText(e.target.value)}
+                    <div className="h-8 w-[1px] bg-gray-200 mx-1 hidden lg:block"></div>
+
+                    <Button variant="outline" onClick={() => setIsBulkAdding(true)} className="text-xs h-10 border-emerald-600 text-emerald-600">
+                        <UploadCloud size={16} className="mr-2"/> Importar Texto
+                    </Button>
+                    
+                    <Button onClick={() => setIsAdding(true)} className="text-xs h-10 bg-emerald-600 hover:bg-emerald-700">
+                        <Plus size={16} className="mr-2"/> Novo
+                    </Button>
+
+                    {selectedIds.size > 0 && (
+                        <Button variant="danger" onClick={handleBulkDelete} disabled={loading} className="text-xs h-10 bg-red-600 hover:bg-red-700 shadow-lg shadow-red-100">
+                            {loading ? <Loader2 className="animate-spin" size={16}/> : <Trash2 size={16} className="mr-2"/>}
+                            Excluir Selecionados ({selectedIds.size})
+                        </Button>
+                    )}
+                </div>
+            </div>
+
+            {/* FORMULÁRIO INDIVIDUAL COM SUPORTE A IMAGEM */}
+            {isAdding && (
+                <Card className="border-2 border-emerald-500 shadow-xl p-8 animate-scale-in">
+                    <div className="flex justify-between items-center mb-8 border-b pb-4">
+                        <div className="flex items-center gap-2">
+                            <Plus className="text-emerald-500"/>
+                            <h3 className="font-black text-2xl text-gray-800">{editingId ? 'Editar Produto Mestre' : 'Novo Produto Individual'}</h3>
+                        </div>
+                        <button type="button" onClick={cancelEdit} className="text-gray-400 hover:text-red-500 p-2"><X size={24}/></button>
+                    </div>
+                    
+                    <div className="grid md:grid-cols-4 gap-8 mb-8">
+                        {/* PRÉ-VISUALIZAÇÃO DE IMAGEM */}
+                        <div className="md:col-span-1">
+                            <label className="text-[10px] font-black text-gray-400 uppercase mb-2 block">Capa do Produto</label>
+                            <div className="aspect-square bg-gray-50 border-2 border-dashed border-gray-200 rounded-3xl flex flex-col items-center justify-center overflow-hidden group relative">
+                                {fields.image ? (
+                                    <>
+                                        <img src={fields.image} className="w-full h-full object-contain p-4" />
+                                        <button type="button" onClick={() => setFields({...fields, image: ''})} className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <X size={12}/>
+                                        </button>
+                                    </>
+                                ) : (
+                                    <ImageIcon className="text-gray-200" size={60}/>
+                                )}
+                            </div>
+                            <input 
+                                className="w-full p-2 mt-4 border rounded-xl text-[10px] outline-none focus:ring-1 focus:ring-emerald-500" 
+                                placeholder="Link da imagem (URL)..."
+                                value={fields.image}
+                                onChange={e => setFields({...fields, image: e.target.value})}
                             />
-                            <div className="mt-4 flex justify-end gap-2">
-                                <Button variant="secondary" onClick={handleSeed} title="Auto-Popular">
-                                     Usar Dados de Exemplo (Seed)
-                                </Button>
-                                <Button onClick={handleAnalyzeBulk} disabled={loading} className="!bg-indigo-600 hover:!bg-indigo-700">
-                                    {loading ? 'Processando...' : 'Analisar Lista'} <ArrowRight size={16} className="ml-2"/>
-                                </Button>
-                            </div>
-                        </>
-                    ) : (
-                        <div className="space-y-4">
-                            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden max-h-[600px] overflow-y-auto shadow-sm">
-                                <table className="w-full text-left text-sm">
-                                    <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
-                                        <tr>
-                                            <th className="p-3 font-bold text-gray-600 w-1/3">Nome Padronizado</th>
-                                            <th className="p-3 font-bold text-gray-600 w-1/3">Categoria Inferida</th>
-                                            <th className="p-3 font-bold text-gray-600">Status</th>
-                                            <th className="p-3 font-bold text-gray-600 w-10"></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-100">
-                                        {previewItems.map((item, idx) => (
-                                            <tr key={idx} className={`hover:bg-gray-50 transition-colors ${item.action === 'IGNORE' ? 'opacity-60 bg-gray-50/50' : ''}`}>
-                                                <td className="p-2">
-                                                    <input type="text" className="w-full p-1 border rounded" value={item.rawName} onChange={e => updatePreviewItem(idx, 'rawName', e.target.value)}/>
-                                                </td>
-                                                <td className="p-2">
-                                                    <select className="w-full p-1 border rounded text-xs" value={item.category} onChange={e => updatePreviewItem(idx, 'category', e.target.value)}>
-                                                        {PRODUCT_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                                                    </select>
-                                                </td>
-                                                <td className="p-2 cursor-pointer select-none" onClick={() => toggleAction(idx)}>
-                                                    {item.action === 'CREATE' ? <Badge color="green">Novo</Badge> : <Badge color="gray">Já Existe</Badge>}
-                                                </td>
-                                                <td className="p-2"><button onClick={() => removePreviewItem(idx)}><Trash2 size={16} className="text-red-400"/></button></td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div className="flex justify-end gap-2">
-                                <Button variant="secondary" onClick={() => setIsReviewing(false)}>Voltar</Button>
-                                <Button onClick={handleConfirmImport} disabled={loading} className="!bg-indigo-600">Salvar no Mestre</Button>
+                        </div>
+
+                        <div className="md:col-span-3 space-y-6">
+                            <div className="grid md:grid-cols-2 gap-6">
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="text-[10px] font-black text-gray-400 uppercase mb-1 block">Nome Comercial (Identificador)</label>
+                                        <input 
+                                            className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-bold" 
+                                            value={fields.name} 
+                                            placeholder="Ex: Panadol (Paracetamol), 500mg, Comp..."
+                                            onChange={e => setFields({...fields, name: e.target.value})} 
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-[10px] font-black text-gray-400 uppercase mb-1 block">Categoria</label>
+                                            <select className="w-full p-3 border rounded-xl text-sm" value={fields.category} onChange={e => setFields({...fields, category: e.target.value})}>
+                                                {PRODUCT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-black text-gray-400 uppercase mb-1 block">Preço de Ref. (Kz)</label>
+                                            <input type="number" className="w-full p-3 border rounded-xl font-bold" value={fields.referencePrice} onChange={e => setFields({...fields, referencePrice: Number(e.target.value)})} />
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black text-gray-400 uppercase mb-1 block">Ficha Técnica / Detalhes</label>
+                                    <textarea className="w-full p-3 border rounded-xl h-40 outline-none focus:ring-2 focus:ring-emerald-500 text-sm" value={fields.description} onChange={e => setFields({...fields, description: e.target.value})} />
+                                </div>
                             </div>
                         </div>
-                    )}
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-4 border-t">
+                        <Button variant="outline" onClick={cancelEdit} className="px-8 font-bold">Cancelar</Button>
+                        <Button onClick={handleSave} disabled={loading} className="px-12 font-black bg-emerald-600"><Save size={18} className="mr-2"/> Gravar no Catálogo</Button>
+                    </div>
                 </Card>
             )}
 
-             {/* Formulário de Adição Individual */}
-             {isAdding && (
-                 <Card className="bg-emerald-50 border-emerald-100 p-4">
-                     <h3 className="font-bold text-emerald-800 mb-4">Adicionar Item Manualmente</h3>
-                     <div className="grid md:grid-cols-2 gap-4">
-                         <div>
-                             <label className="text-xs font-bold text-gray-500">Nome do Medicamento</label>
-                             <input className="w-full p-2 rounded border" placeholder="Ex: Paracetamol 500mg" value={newProduct.name} onChange={e => setNewProduct({...newProduct, name: e.target.value})} />
-                         </div>
-                         <div>
-                             <label className="text-xs font-bold text-gray-500">Categoria</label>
-                             <select className="w-full p-2 rounded border" value={newProduct.category} onChange={e => setNewProduct({...newProduct, category: e.target.value})}>
-                                 {PRODUCT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                             </select>
-                         </div>
-                         <div className="col-span-2">
-                             <label className="text-xs font-bold text-gray-500">Descrição Padrão</label>
-                             <input className="w-full p-2 rounded border" placeholder="Descrição genérica..." value={newProduct.description} onChange={e => setNewProduct({...newProduct, description: e.target.value})} />
-                         </div>
-                         <div className="col-span-2 flex justify-end gap-2">
-                             <Button variant="secondary" onClick={() => setIsAdding(false)}>Cancelar</Button>
-                             <Button onClick={handleAdd}>Salvar</Button>
-                         </div>
-                     </div>
-                 </Card>
-             )}
-
-             {/* Busca */}
-             {!isAdding && !isBulkMode && (
-                <div className="bg-white p-2 rounded-lg border flex items-center gap-2 shadow-sm">
-                    <Search className="text-gray-400 ml-2"/>
-                    <input 
-                        className="w-full outline-none" 
-                        placeholder="Pesquisar no catálogo global..." 
-                        value={searchTerm}
-                        onChange={e => setSearchTerm(e.target.value)}
-                    />
-                </div>
-             )}
-
-             {/* Lista */}
-             {!isAdding && !isBulkMode && (
-                loading ? <div className="text-center p-10"><Loader2 className="animate-spin inline text-emerald-600"/></div> : (
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                        <table className="w-full text-left">
-                            <thead className="bg-gray-50 border-b">
-                                <tr>
-                                    <th className="p-3 text-xs font-bold text-gray-500 uppercase">Nome</th>
-                                    <th className="p-3 text-xs font-bold text-gray-500 uppercase">Categoria</th>
-                                    <th className="p-3 text-xs font-bold text-gray-500 uppercase">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {products.map(p => (
-                                    <tr key={p.id} className="border-b hover:bg-gray-50">
-                                        <td className="p-3 font-medium text-gray-800">{p.name}</td>
-                                        <td className="p-3 text-sm text-gray-600"><Tag size={12} className="inline mr-1"/> {p.category}</td>
-                                        <td className="p-3"><Badge color="green">Mestre</Badge></td>
-                                    </tr>
-                                ))}
-                                {products.length === 0 && (
-                                    <tr><td colSpan={3} className="p-6 text-center text-gray-400">Nenhum produto encontrado.</td></tr>
-                                )}
-                            </tbody>
-                        </table>
+            {/* TABELA DE RESULTADOS COM MINIATURAS */}
+            <div className="bg-white rounded-3xl shadow-sm border overflow-hidden">
+                <div className="p-4 bg-gray-50 border-b flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                        <input 
+                            type="checkbox" 
+                            checked={selectedIds.size === products.length && products.length > 0} 
+                            onChange={toggleSelectAll} 
+                            className="w-5 h-5 rounded text-emerald-600 cursor-pointer" 
+                        />
+                        <span className="text-xs font-black text-gray-400 uppercase tracking-widest ml-2">Selecionar Tudo</span>
                     </div>
-                )
-             )}
+                    <span className="text-xs font-bold text-gray-400">{products.length} itens no total</span>
+                </div>
+                
+                <table className="w-full text-left">
+                    <thead className="bg-white text-[10px] font-black text-gray-400 uppercase tracking-widest border-b">
+                        <tr>
+                            <th className="p-6 w-10"></th>
+                            <th className="p-6">Medicamento</th>
+                            <th className="p-6">Categoria</th>
+                            <th className="p-6 text-right">Preço Ref.</th>
+                            <th className="p-6 text-right">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50 bg-white">
+                        {loading && products.length === 0 ? (
+                            <tr><td colSpan={5} className="p-20 text-center"><Loader2 className="animate-spin mx-auto text-emerald-500"/></td></tr>
+                        ) : products.length === 0 ? (
+                            <tr><td colSpan={5} className="p-20 text-center text-gray-400 italic">Nenhum produto encontrado.</td></tr>
+                        ) : (
+                            products.map(p => (
+                                <tr key={p.id} className={`hover:bg-gray-50 transition-all group ${selectedIds.has(p.id) ? 'bg-emerald-50' : ''}`}>
+                                    <td className="p-6">
+                                        <input 
+                                            type="checkbox" 
+                                            checked={selectedIds.has(p.id)} 
+                                            onChange={() => toggleSelect(p.id)} 
+                                            className="w-5 h-5 rounded text-emerald-600 cursor-pointer" 
+                                        />
+                                    </td>
+                                    <td className="p-6">
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-10 h-10 bg-gray-50 rounded-lg flex items-center justify-center p-1 border shadow-inner">
+                                                <img src={p.image} className="w-full h-full object-contain" />
+                                            </div>
+                                            <div className="flex flex-col">
+                                                <span className="font-bold text-gray-800 text-sm">{p.name}</span>
+                                                <span className="text-[10px] text-gray-400 truncate max-w-xs">{p.description}</span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td className="p-6"><Badge color="blue">{p.category}</Badge></td>
+                                    <td className="p-6 text-right font-mono font-bold text-gray-500">Kz {p.referencePrice?.toLocaleString() || '0'}</td>
+                                    <td className="p-6 text-right">
+                                        <div className="flex justify-end gap-2 relative z-50">
+                                            <button 
+                                                type="button"
+                                                onClick={(e) => startEdit(e, p)} 
+                                                className="p-3 text-blue-500 bg-blue-50 hover:bg-blue-500 hover:text-white rounded-xl transition-all cursor-pointer shadow-sm"
+                                                title="Editar Informações"
+                                            >
+                                                <Edit2 size={16}/>
+                                            </button>
+                                            <button 
+                                                type="button"
+                                                onClick={(e) => handleDeleteSingle(e, p.id)} 
+                                                className="p-3 text-red-500 bg-red-50 hover:bg-red-500 hover:text-white rounded-xl transition-all cursor-pointer shadow-sm"
+                                                title="Excluir Permanentemente"
+                                            >
+                                                <Trash2 size={16}/>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))
+                        )}
+                    </tbody>
+                </table>
+            </div>
         </div>
     );
 }

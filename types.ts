@@ -13,20 +13,9 @@ export interface User {
   address?: string; 
   role: UserRole;
   pharmacyId?: string;
+  status?: 'ACTIVE' | 'BLOCKED';
+  createdAt?: string;
 }
-
-export interface PharmacyInput {
-  name: string;
-  nif: string;
-  address: string;
-  deliveryFee: number;
-  minTime: string;
-  rating: number;
-  ownerEmail?: string; 
-  phone?: string; 
-}
-
-export type PharmacyStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
 export interface Pharmacy {
   id: string;
@@ -37,15 +26,60 @@ export interface Pharmacy {
   deliveryFee: number;
   minTime: string;
   isAvailable: boolean;
-  distance: string;
-  status: PharmacyStatus;
-  accessCode?: string; 
-  ownerEmail?: string; 
-  phone?: string; 
-  commissionRate?: number; 
+  status: string;
+  ownerEmail: string;
+  commissionRate?: number;
+  phone?: string;
+  distance?: string;
 }
 
-// Organizado Alfabeticamente para melhor UX
+// Added PharmacyInput for settings and management
+export interface PharmacyInput {
+  name: string;
+  nif: string;
+  address: string;
+  deliveryFee: number;
+  minTime: string;
+  rating: number;
+  phone: string;
+}
+
+// Added PharmacyFinancials for accounting views
+export interface PharmacyFinancials {
+  id: string;
+  name: string;
+  commissionRate: number;
+  stats: {
+    totalSales: number;
+    platformFees: number;
+    netEarnings: number;
+    pendingClearance: number;
+  }
+}
+
+export interface GlobalProduct {
+    id: string;
+    name: string;
+    description: string;
+    category: string;
+    image: string;
+    common: boolean; 
+    referencePrice?: number; // Preço base para governança
+}
+
+export interface Product {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  pharmacyId: string;
+  image: string;
+  requiresPrescription: boolean;
+  stock: number;
+  category?: string; 
+  globalProductId?: string; 
+}
+
 export const PRODUCT_CATEGORIES = [
     "Alergias e Reações Alérgicas",
     "Antibióticos e Antimicrobianos",
@@ -78,35 +112,13 @@ export const PRODUCT_CATEGORIES = [
     "Outros / Uso Especial"
 ];
 
-// PRODUTO DE REFERÊNCIA (CATÁLOGO GLOBAL)
-export interface GlobalProduct {
-    id: string;
-    name: string;
-    description: string;
-    category: string;
-    image: string;
-    common: boolean; // Se é um medicamento muito comum
-}
-
-export interface Product {
-  id: string;
-  name: string;
-  description: string;
-  price: number;
-  pharmacyId: string;
-  image: string;
-  requiresPrescription: boolean;
-  stock: number;
-  category?: string; // Novo campo
-  globalProductId?: string; // Link para o catálogo global
-}
-
 export interface CartItem extends Product {
   quantity: number;
 }
 
 export enum OrderStatus {
   PENDING = 'Pendente',
+  CONFIRMED = 'Confirmado',
   PREPARING = 'Em Preparação',
   OUT_FOR_DELIVERY = 'Saiu para Entrega',
   READY_FOR_PICKUP = 'Pronto para Retirada',
@@ -119,7 +131,6 @@ export interface Order {
   id: string;
   customerName: string;
   customerPhone?: string; 
-  pharmacyPhone?: string; 
   items: CartItem[];
   total: number;
   status: OrderStatus;
@@ -127,12 +138,7 @@ export interface Order {
   type: 'DELIVERY' | 'PICKUP';
   pharmacyId: string;
   address?: string;
-  commissionAmount?: number; 
-}
-
-export enum PrescriptionStatus {
-  WAITING_FOR_QUOTES = 'Aguardando Orçamentos',
-  COMPLETED = 'Concluído'
+  commissionAmount?: number;
 }
 
 export interface QuotedItem {
@@ -152,6 +158,7 @@ export interface PrescriptionQuote {
   deliveryFee: number;
   status: 'RESPONDED' | 'REJECTED' | 'ACCEPTED';
   notes?: string;
+  rejectionReason?: string;
   createdAt: string;
 }
 
@@ -160,7 +167,7 @@ export interface PrescriptionRequest {
   customerId: string;
   imageUrl: string;
   date: string;
-  status: PrescriptionStatus;
+  status: string;
   targetPharmacies: string[]; 
   notes?: string;
   quotes?: PrescriptionQuote[]; 
@@ -173,13 +180,32 @@ export interface DashboardStats {
   productsCount: number;
 }
 
-export interface FinancialSummary {
-  totalSales: number;     
-  platformFees: number;   
-  netEarnings: number;    
-  pendingClearance: number; 
+// Added Notification for system alerts
+export interface Notification {
+  id: string;
+  userId: string;
+  title: string;
+  message: string;
+  type: string;
+  read: boolean;
+  date: string;
+  link?: string;
 }
 
-export interface PharmacyFinancials extends Pharmacy {
-  stats: FinancialSummary;
+// Added CarouselSlide for landing page management
+export interface CarouselSlide {
+  id: string;
+  title: string;
+  subtitle: string;
+  imageUrl: string;
+  buttonText: string;
+  order: number;
+}
+
+// Added Partner for brand logos display
+export interface Partner {
+  id: string;
+  name: string;
+  logoUrl: string;
+  active: boolean;
 }

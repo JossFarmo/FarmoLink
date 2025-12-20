@@ -1,12 +1,11 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, XCircle, FileText, ChevronDown, Clock, Check, RefreshCw, Package, Store, MapPin, Phone, CreditCard, Info, CheckCircle, Mail, ThumbsUp, MessageCircle, Loader2 } from 'lucide-react';
+import { Camera, XCircle, FileText, ChevronDown, Clock, Check, RefreshCw, Package, Store, MapPin, Phone, CreditCard, Info, CheckCircle, Mail, ThumbsUp, MessageCircle, Loader2, Bike, X, Calendar } from 'lucide-react';
 import { Order, PrescriptionRequest, PrescriptionQuote, OrderStatus, User, Pharmacy } from '../types';
 import { Button, Card, Badge } from '../components/UI';
-import { updateOrderStatus, acceptQuote, createPrescriptionRequest, deletePrescriptionRequest } from '../services/dataService';
+import { updateOrderStatus, acceptQuote, createPrescriptionRequest, deletePrescriptionRequest, rejectCustomerQuote } from '../services/dataService';
 import { playSound } from '../services/soundService';
 
-// --- CUSTOMER ORDERS VIEW (Pedidos em Tempo Real) ---
 export const CustomerOrdersView = ({ orders, pharmacies, onRefresh }: { orders: Order[], pharmacies?: Pharmacy[], onRefresh: () => void }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -34,29 +33,34 @@ export const CustomerOrdersView = ({ orders, pharmacies, onRefresh }: { orders: 
      }
   }
 
-  const getStatusStep = (status: OrderStatus) => {
-    switch(status) {
-       case OrderStatus.PENDING: return 1;
-       case OrderStatus.PREPARING: return 2;
-       case OrderStatus.OUT_FOR_DELIVERY: return 3;
-       case OrderStatus.READY_FOR_PICKUP: return 3;
-       case OrderStatus.COMPLETED: return 4;
-       case OrderStatus.CANCELLED: return 0;
-       case OrderStatus.REJECTED: return 0;
-       default: return 0;
-    }
+  const getTimelineSteps = (status: OrderStatus, type: 'DELIVERY' | 'PICKUP') => {
+      const steps = [
+          { status: OrderStatus.PENDING, label: 'Enviado', icon: FileText, active: false, date: '' },
+          { status: OrderStatus.PREPARING, label: 'Preparando', icon: Package, active: false, date: '' },
+          { status: type === 'DELIVERY' ? OrderStatus.OUT_FOR_DELIVERY : OrderStatus.READY_FOR_PICKUP, label: type === 'DELIVERY' ? 'Saiu p/ Entrega' : 'Pronto', icon: type === 'DELIVERY' ? Bike : Store, active: false, date: '' },
+          { status: OrderStatus.COMPLETED, label: 'Concluído', icon: CheckCircle, active: false, date: '' }
+      ];
+
+      const statusOrder = [OrderStatus.PENDING, OrderStatus.PREPARING, type === 'DELIVERY' ? OrderStatus.OUT_FOR_DELIVERY : OrderStatus.READY_FOR_PICKUP, OrderStatus.COMPLETED];
+      const currentIdx = statusOrder.indexOf(status);
+
+      return steps.map((s, idx) => ({
+          ...s,
+          active: idx <= currentIdx,
+          current: idx === currentIdx
+      }));
   }
 
-  const getFriendlyStatus = (status: OrderStatus, type: 'DELIVERY' | 'PICKUP') => {
+  const getFriendlyStatus = (status: OrderStatus) => {
       switch(status) {
-        case OrderStatus.PENDING: return { text: "Aguardando", desc: "A farmácia ainda não viu seu pedido", color: 'blue' };
-        case OrderStatus.PREPARING: return { text: "Em Preparação", desc: "A farmácia está separando seus itens", color: 'yellow' };
-        case OrderStatus.OUT_FOR_DELIVERY: return { text: "Saiu para Entrega", desc: "O motorista está a caminho. Confirme o recebimento abaixo.", color: 'orange' };
-        case OrderStatus.READY_FOR_PICKUP: return { text: "Pronto para Retirada", desc: "Dirija-se à farmácia. Confirme o recebimento abaixo.", color: 'orange' };
-        case OrderStatus.COMPLETED: return { text: "Concluído", desc: type === 'DELIVERY' ? "Entregue e Confirmado" : "Retirado e Confirmado", color: 'green' };
-        case OrderStatus.CANCELLED: return { text: "Cancelado", desc: "Você cancelou este pedido", color: 'red' };
-        case OrderStatus.REJECTED: return { text: "Não Aceite", desc: "A farmácia não pôde aceitar (ex: estoque)", color: 'red' };
-        default: return { text: status, desc: "", color: 'gray' };
+        case OrderStatus.PENDING: return { text: "Pendente", color: 'blue' };
+        case OrderStatus.PREPARING: return { text: "Em Preparação", color: 'yellow' };
+        case OrderStatus.OUT_FOR_DELIVERY: return { text: "Saiu para Entrega", color: 'orange' };
+        case OrderStatus.READY_FOR_PICKUP: return { text: "Pronto p/ Retirada", color: 'orange' };
+        case OrderStatus.COMPLETED: return { text: "Concluído", color: 'green' };
+        case OrderStatus.CANCELLED: return { text: "Cancelado", color: 'red' };
+        case OrderStatus.REJECTED: return { text: "Recusado", color: 'red' };
+        default: return { text: status, color: 'gray' };
       }
   }
 
@@ -78,118 +82,108 @@ export const CustomerOrdersView = ({ orders, pharmacies, onRefresh }: { orders: 
     )}
 
     {orders.map((o: Order) => {
-      const step = getStatusStep(o.status);
-      const friendly = getFriendlyStatus(o.status, o.type);
+      const timeline = getTimelineSteps(o.status, o.type);
+      const friendly = getFriendlyStatus(o.status);
       const pharmacy = pharmacies?.find(p => p.id === o.pharmacyId);
-      const shortDate = o.date.split(',')[0] + ' • ' + (o.date.split(',')[1]?.trim() || '');
       const isCancelled = o.status === OrderStatus.CANCELLED || o.status === OrderStatus.REJECTED;
       const canConfirm = o.status === OrderStatus.OUT_FOR_DELIVERY || o.status === OrderStatus.READY_FOR_PICKUP;
 
       return (
-      <Card key={o.id} className="overflow-hidden">
+      <Card key={o.id} className="overflow-hidden transition-all hover:shadow-md">
          <div className="p-6 cursor-pointer hover:bg-gray-50 transition-colors" onClick={() => { playSound('click'); setExpandedId(expandedId === o.id ? null : o.id); }}>
            <div className="flex justify-between items-center mb-4">
              <div>
                 <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
                     Pedido #{o.id.slice(0,8)}
-                    <span className="text-xs font-normal text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full flex items-center gap-1">
-                        <Clock size={10} /> {shortDate}
-                    </span>
+                    <Badge color={friendly.color as any}>{friendly.text}</Badge>
                 </h3>
-                <p className="text-sm text-gray-500 mt-1">{pharmacy ? pharmacy.name : 'Farmácia'}</p>
+                <p className="text-sm text-gray-500 mt-1 flex items-center gap-1">
+                    <Store size={12}/> {pharmacy ? pharmacy.name : 'Farmácia'} • {o.date.split(',')[0]}
+                </p>
              </div>
-             <Badge color={friendly.color as any}>{friendly.text}</Badge>
-           </div>
-           
-           <div className="flex justify-between items-center">
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                 <Store className="w-4 h-4" />
-                 <span>{o.type === 'PICKUP' ? 'Retirada na Loja' : 'Entrega em Casa'}</span>
-              </div>
-              <div className="text-right">
-                 <p className="font-bold text-lg text-emerald-600">Kz {o.total}</p>
-                 <p className="text-xs text-gray-400">{o.items.length} itens</p>
-              </div>
+             <div className="text-right">
+                <p className="font-bold text-lg text-emerald-600">Kz {o.total}</p>
+                <ChevronDown className={`inline transition-transform ${expandedId === o.id ? 'rotate-180' : ''}`} />
+             </div>
            </div>
          </div>
 
          {expandedId === o.id && (
            <div className="border-t border-gray-100 bg-gray-50 p-6 animate-fade-in">
               {!isCancelled && (
-                  <div className="mb-8 relative mt-2">
-                    <div className="h-1 bg-gray-200 w-full absolute top-3 left-0 z-0"></div>
-                    <div className="h-1 bg-emerald-500 absolute top-3 left-0 z-0 transition-all duration-500" style={{ width: `${(Math.max(0, step - 1) / 3) * 100}%` }}></div>
-                    
-                    <div className="flex justify-between relative z-10 text-xs font-bold text-gray-500">
-                        <div className="text-center">
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center mx-auto mb-2 ${step >= 1 ? 'bg-emerald-600 text-white' : 'bg-gray-200'}`}>1</div>
-                        Pendente
-                        </div>
-                        <div className="text-center">
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center mx-auto mb-2 ${step >= 2 ? 'bg-emerald-600 text-white' : 'bg-gray-200'}`}>2</div>
-                        Preparo
-                        </div>
-                        <div className="text-center">
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center mx-auto mb-2 ${step >= 3 ? 'bg-emerald-600 text-white' : 'bg-gray-200'}`}>3</div>
-                        {o.type === 'PICKUP' ? 'Pronto' : 'Entrega'}
-                        </div>
-                        <div className="text-center">
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center mx-auto mb-2 ${step >= 4 ? 'bg-emerald-600 text-white' : 'bg-gray-200'}`}><Check size={14}/></div>
-                        Concluído
-                        </div>
+                  <div className="mb-8 px-2">
+                    <div className="relative flex justify-between items-center">
+                        <div className="absolute top-1/2 left-0 w-full h-1 bg-gray-200 -z-0"></div>
+                        {timeline.map((step, idx) => (
+                            <div key={idx} className="relative z-10 flex flex-col items-center">
+                                <div className={`w-10 h-10 rounded-full flex items-center justify-center border-4 transition-colors duration-300 ${
+                                    step.active 
+                                    ? 'bg-emerald-600 border-emerald-100 text-white' 
+                                    : 'bg-white border-gray-200 text-gray-300'
+                                }`}>
+                                    <step.icon size={16} />
+                                </div>
+                                <span className={`text-xs font-bold mt-2 ${step.active ? 'text-emerald-800' : 'text-gray-400'}`}>{step.label}</span>
+                            </div>
+                        ))}
                     </div>
                   </div>
               )}
 
-              <div className={`border p-4 rounded-lg mb-6 flex items-start gap-3 justify-between ${isCancelled ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-100'}`}>
-                  <div className="flex gap-3">
-                    <Info className={`${isCancelled ? 'text-red-600' : 'text-blue-600'} w-5 h-5 shrink-0 mt-0.5`} />
-                    <div>
-                        <p className={`font-bold ${isCancelled ? 'text-red-800' : 'text-blue-800'}`}>{friendly.text}</p>
-                        <p className={`text-sm ${isCancelled ? 'text-red-600' : 'text-blue-600'}`}>{friendly.desc}</p>
-                        <p className="text-xs text-gray-400 mt-1">Atualizado às {currentTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} (tempo real)</p>
-                    </div>
+              <div className={`border p-4 rounded-xl mb-6 flex items-start gap-4 shadow-sm ${isCancelled ? 'bg-red-50 border-red-200' : 'bg-white border-gray-200'}`}>
+                  <div className={`p-3 rounded-full ${isCancelled ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+                    {isCancelled ? <XCircle size={24}/> : <Info size={24}/>}
+                  </div>
+                  <div className="flex-1">
+                        <p className={`font-bold text-lg ${isCancelled ? 'text-red-800' : 'text-blue-800'}`}>{friendly.text}</p>
+                        <p className="text-xs text-gray-400 mt-1">Última atualização: {currentTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
                   </div>
                   
-                  {o.status === OrderStatus.PENDING && (
-                      <Button variant="danger" className="!py-1 !px-3 !text-xs" onClick={() => handleCancelOrder(o.id)}>Cancelar Pedido</Button>
-                  )}
-                  
-                  {canConfirm && (
-                      <Button onClick={() => handleConfirmReceipt(o.id)} className="!py-1 !px-3 !text-sm flex gap-2 animate-pulse">
-                         <ThumbsUp size={16} /> Confirmar Recebimento
-                      </Button>
-                  )}
+                  <div className="flex flex-col gap-2">
+                    {o.status === OrderStatus.PENDING && (
+                        <Button variant="danger" className="text-xs" onClick={() => handleCancelOrder(o.id)}>Cancelar</Button>
+                    )}
+                    {canConfirm && (
+                        <Button onClick={() => handleConfirmReceipt(o.id)} className="text-xs flex gap-2 animate-pulse bg-emerald-600 hover:bg-emerald-700">
+                           <ThumbsUp size={14} /> Confirmar Recebimento
+                        </Button>
+                    )}
+                  </div>
               </div>
 
               <div className="grid md:grid-cols-2 gap-4">
-                  <div className="p-4 bg-white rounded-lg border border-gray-200">
-                     <h5 className="font-bold text-gray-700 text-sm mb-2 flex items-center gap-2"><MapPin size={16}/> {o.type === 'PICKUP' ? 'Local de Retirada' : 'Endereço de Entrega'}</h5>
-                     <p className="text-sm text-gray-600">{o.address || 'N/A'}</p>
-                     
-                     {/* EXIBIÇÃO DO CONTATO DA FARMÁCIA (Se disponível) */}
-                     {pharmacy && (pharmacy.phone || pharmacy.ownerEmail) && (
-                         <div className="mt-4 pt-4 border-t border-gray-100">
-                             <p className="text-xs text-gray-400 font-bold uppercase mb-2">Fale com a Farmácia</p>
-                             <div className="flex gap-2 flex-wrap">
-                                {/* Simulamos um número se não tiver, para fins de UI, ou usamos o email */}
+                  <div className="p-4 bg-white rounded-xl border border-gray-200 shadow-sm">
+                     <h5 className="font-bold text-gray-800 text-sm mb-3 flex items-center gap-2 border-b border-gray-100 pb-2"><MapPin size={16} className="text-emerald-500"/> {o.type === 'PICKUP' ? 'Local de Retirada' : 'Entrega'}</h5>
+                     <p className="text-sm text-gray-600 mb-4">{o.address || 'N/A'}</p>
+                     {pharmacy && (
+                         <div className="bg-gray-50 rounded-lg p-3">
+                             <p className="text-xs text-gray-500 font-bold uppercase mb-2">Contatar Farmácia</p>
+                             <div className="flex gap-2">
                                 {pharmacy.phone ? (
                                     <>
-                                        <a href={`tel:${pharmacy.phone}`} className="px-3 py-1 bg-green-50 text-green-700 rounded text-sm flex items-center gap-2 hover:bg-green-100"><Phone size={14}/> Ligar</a>
-                                        <a href={`https://wa.me/${pharmacy.phone.replace(/\D/g,'')}`} target="_blank" className="px-3 py-1 bg-green-50 text-green-700 rounded text-sm flex items-center gap-2 hover:bg-green-100"><MessageCircle size={14}/> WhatsApp</a>
+                                        <a href={`tel:${pharmacy.phone}`} className="flex-1 py-2 bg-white border border-gray-200 text-gray-700 rounded text-xs flex items-center justify-center gap-2 hover:bg-gray-100 font-medium"><Phone size={14}/> Ligar</a>
+                                        <a href={`https://wa.me/${pharmacy.phone.replace(/\D/g,'')}`} target="_blank" className="flex-1 py-2 bg-green-50 text-green-700 border border-green-200 rounded text-xs flex items-center justify-center gap-2 hover:bg-green-100 font-medium"><MessageCircle size={14}/> WhatsApp</a>
                                     </>
                                 ) : (
-                                     <a href={`mailto:${pharmacy.ownerEmail}`} className="px-3 py-1 bg-gray-50 text-gray-700 rounded text-sm flex items-center gap-2 hover:bg-gray-100"><Mail size={14}/> {pharmacy.ownerEmail}</a>
+                                     <a href={`mailto:${pharmacy.ownerEmail}`} className="w-full py-2 bg-gray-100 text-gray-700 rounded text-xs flex items-center justify-center gap-2 hover:bg-gray-200"><Mail size={14}/> Enviar Email</a>
                                 )}
                              </div>
                          </div>
                      )}
                   </div>
-                  <div className="p-4 bg-white rounded-lg border border-gray-200">
-                     <h5 className="font-bold text-gray-700 text-sm mb-2 flex items-center gap-2"><CreditCard size={16}/> Pagamento</h5>
-                     <div className="text-right">
-                         <p className="text-xs text-gray-500">Total a Pagar</p>
-                         <p className="text-xl font-bold text-emerald-600">Kz {o.total}</p>
+                  <div className="p-4 bg-white rounded-xl border border-gray-200 shadow-sm">
+                     <h5 className="font-bold text-gray-800 text-sm mb-3 flex items-center gap-2 border-b border-gray-100 pb-2"><Package size={16} className="text-blue-500"/> Itens do Pedido</h5>
+                     <div className="space-y-2 max-h-40 overflow-y-auto pr-1 custom-scrollbar">
+                        {o.items.map((item, idx) => (
+                            <div key={idx} className="flex justify-between text-sm">
+                                <span className="text-gray-600">{item.quantity}x {item.name}</span>
+                                <span className="font-medium text-gray-800">Kz {item.price * item.quantity}</span>
+                            </div>
+                        ))}
+                     </div>
+                     <div className="mt-4 pt-2 border-t border-gray-100 flex justify-between items-center">
+                         <span className="text-sm font-bold text-gray-500">Total</span>
+                         <span className="text-xl font-bold text-emerald-600">Kz {o.total}</span>
                      </div>
                   </div>
               </div>
@@ -202,7 +196,6 @@ export const CustomerOrdersView = ({ orders, pharmacies, onRefresh }: { orders: 
   );
 };
 
-// ... Prescription views mantidos ...
 export const PrescriptionUploadView = ({ pharmacies, user, onNavigate }: { pharmacies: Pharmacy[], user: User, onNavigate: (page: string) => void }) => {
   const [image, setImage] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
@@ -226,7 +219,6 @@ export const PrescriptionUploadView = ({ pharmacies, user, onNavigate }: { pharm
       return;
     }
     
-    // Check telefone aqui também
     if (!user.phone || user.phone.length < 9) {
         playSound('error');
         alert("Adicione um número de telefone no perfil para enviar receitas.");
@@ -309,13 +301,10 @@ export const PrescriptionUploadView = ({ pharmacies, user, onNavigate }: { pharm
 
 export const PrescriptionsListView = ({ requests, user, onNavigate }: { requests: PrescriptionRequest[], user: User, onNavigate: (page: string) => void }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [processingQuoteId, setProcessingQuoteId] = useState<string | null>(null); // NOVO: Estado de processamento individual
+  const [processingQuoteId, setProcessingQuoteId] = useState<string | null>(null);
 
   const handleAcceptQuote = async (quote: PrescriptionQuote) => {
-    // Evita duplo clique imediato
     if (processingQuoteId) return;
-
-    // Verificação de segurança para garantir que temos o telefone
     if (!user.phone || user.phone.length < 9) {
         playSound('error');
         alert("Atenção: Para aceitar o orçamento, precisamos do seu número de telefone para entrega.\n\nPor favor, atualize seu perfil.");
@@ -324,10 +313,8 @@ export const PrescriptionsListView = ({ requests, user, onNavigate }: { requests
     }
 
     if (confirm(`Aceitar orçamento de Kz ${quote.totalPrice} da farmácia ${quote.pharmacyName}?`)) {
-       setProcessingQuoteId(quote.id); // Bloqueia UI
-       // --- CORREÇÃO ISSUE #2: Passando user.phone ---
+       setProcessingQuoteId(quote.id);
        const success = await acceptQuote(quote, user.name, user.address || '', user.phone);
-       
        if (success) {
          playSound('cash');
          alert("Orçamento aceito! Um pedido foi gerado.");
@@ -336,8 +323,21 @@ export const PrescriptionsListView = ({ requests, user, onNavigate }: { requests
          playSound('error');
          alert("Erro ao aceitar orçamento.");
        }
-       setProcessingQuoteId(null); // Libera UI (em caso de erro, pois sucesso navega para outra pagina)
+       setProcessingQuoteId(null);
     }
+  };
+
+  const handleRejectQuote = async (quoteId: string) => {
+      if(!confirm('Deseja realmente recusar este orçamento?')) return;
+      setProcessingQuoteId(quoteId);
+      const success = await rejectCustomerQuote(quoteId);
+      setProcessingQuoteId(null);
+      if(success) {
+          playSound('click');
+          window.location.reload();
+      } else {
+          alert("Erro ao processar recusa.");
+      }
   };
 
   const handleCancelRequest = async (requestId: string) => {
@@ -345,7 +345,7 @@ export const PrescriptionsListView = ({ requests, user, onNavigate }: { requests
           const success = await deletePrescriptionRequest(requestId);
           if(success) {
               playSound('trash');
-              window.location.reload(); // Maneira mais simples de atualizar a lista sem prop de refresh
+              window.location.reload();
           } else {
               alert("Erro ao cancelar.");
           }
@@ -354,7 +354,10 @@ export const PrescriptionsListView = ({ requests, user, onNavigate }: { requests
 
   return (
     <div className="space-y-6 pb-20">
-      <h1 className="text-2xl font-bold text-gray-800">Minhas Receitas</h1>
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-black text-gray-800">Minhas Receitas</h1>
+        <Badge color="blue" className="px-4 py-1">Histórico Digital</Badge>
+      </div>
       
       {requests.length === 0 && (
          <div className="text-center py-10 bg-gray-50 rounded-xl border border-dashed border-gray-300">
@@ -364,71 +367,121 @@ export const PrescriptionsListView = ({ requests, user, onNavigate }: { requests
       )}
 
       {requests.map(req => (
-        <Card key={req.id} className="overflow-hidden">
-           <div className="p-4 flex items-start gap-4 cursor-pointer hover:bg-gray-50 transition-colors" onClick={() => { playSound('click'); setExpandedId(expandedId === req.id ? null : req.id); }}>
-              <div className="w-16 h-16 bg-gray-100 rounded-lg flex-shrink-0 overflow-hidden border border-gray-200">
+        <Card key={req.id} className="overflow-hidden border-gray-100 shadow-md">
+           <div className="p-5 flex items-start gap-5 cursor-pointer hover:bg-gray-50 transition-colors" onClick={() => { playSound('click'); setExpandedId(expandedId === req.id ? null : req.id); }}>
+              <div className="w-20 h-20 bg-gray-100 rounded-2xl flex-shrink-0 overflow-hidden border-2 border-white shadow-sm">
                  <img src={req.imageUrl} className="w-full h-full object-cover" alt="Rx"/>
               </div>
               <div className="flex-1">
-                 <div className="flex justify-between">
-                    <h3 className="font-bold text-gray-800">Solicitação de Medicamentos</h3>
-                    <Badge color={req.status === 'Concluído' ? 'green' : 'yellow'}>{req.status}</Badge>
+                 <div className="flex justify-between items-start">
+                    <div>
+                        <h3 className="font-black text-gray-800 text-lg">Solicitação #{req.id.slice(0,6)}</h3>
+                        <p className="text-[10px] text-emerald-600 font-black uppercase flex items-center gap-1 mt-0.5">
+                            <Calendar size={12}/> Enviado em {req.date}
+                        </p>
+                    </div>
+                    <Badge color={req.status === 'COMPLETED' ? 'green' : 'yellow'}>
+                        {req.status === 'COMPLETED' ? 'FINALIZADO' : 'EM ABERTO'}
+                    </Badge>
                  </div>
-                 <p className="text-xs text-gray-500 mt-1">{req.date}</p>
-                 <p className="text-sm text-gray-600 mt-2 line-clamp-1">{req.notes || "Sem observações"}</p>
-                 <div className="mt-2 text-xs font-bold text-emerald-600 flex items-center gap-1">
-                    {req.quotes?.length || 0} Orçamentos Recebidos {expandedId !== req.id && <ChevronDown size={14}/>}
+                 <p className="text-sm text-gray-500 mt-3 line-clamp-1 italic">"{req.notes || "Sem observações adicionais"}"</p>
+                 <div className="mt-4 flex items-center gap-4">
+                    <div className="flex items-center gap-1.5 text-xs font-black text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+                        <MessageCircle size={14}/> {req.quotes?.length || 0} Orçamentos
+                    </div>
+                    {expandedId !== req.id && <span className="text-[10px] font-black text-gray-300 uppercase tracking-widest flex items-center gap-1 animate-pulse">Clique para detalhes <ChevronDown size={14}/></span>}
                  </div>
               </div>
            </div>
            
            {expandedId === req.id && (
-             <div className="bg-gray-50 border-t border-gray-100 p-4 space-y-3">
-                <div className="flex justify-between items-center mb-2">
-                    <h4 className="font-bold text-gray-700 text-sm uppercase">Orçamentos das Farmácias</h4>
-                    {req.status !== 'Concluído' && (
-                        <button onClick={() => handleCancelRequest(req.id)} className="text-red-500 text-xs hover:underline flex items-center gap-1">
+             <div className="bg-gray-50 border-t border-gray-100 p-6 space-y-4">
+                <div className="flex justify-between items-center mb-4">
+                    <h4 className="font-black text-gray-700 text-xs uppercase tracking-widest">Respostas das Farmácias</h4>
+                    {req.status !== 'COMPLETED' && (
+                        <button onClick={() => handleCancelRequest(req.id)} className="text-red-500 text-[10px] font-black uppercase hover:underline flex items-center gap-1">
                             <XCircle size={12}/> Cancelar Solicitação
                         </button>
                     )}
                 </div>
 
-                {(!req.quotes || req.quotes.length === 0) && <p className="text-sm text-gray-500 italic">Aguardando respostas das farmácias...</p>}
+                {(!req.quotes || req.quotes.length === 0) && (
+                    <div className="bg-white p-10 rounded-3xl text-center border-2 border-dashed border-gray-200">
+                        <Clock className="mx-auto text-gray-300 mb-2 animate-spin-slow" size={32}/>
+                        <p className="text-sm text-gray-400 font-bold">Aguardando cotações das farmácias parceiras...</p>
+                    </div>
+                )}
                 
-                {req.quotes?.map(quote => (
-                  <div key={quote.id} className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm relative overflow-hidden">
-                     {quote.status === 'ACCEPTED' && <div className="absolute top-0 right-0 bg-emerald-500 text-white text-xs px-2 py-1 rounded-bl-lg font-bold">ACEITO</div>}
-                     <div className="flex justify-between items-start mb-2">
-                        <span className="font-bold text-gray-800">{quote.pharmacyName}</span>
-                        <span className="font-bold text-lg text-emerald-600">Kz {quote.totalPrice}</span>
-                     </div>
-                     <div className="space-y-1 mb-3">
-                        {quote.items.map((item, idx) => (
-                          <div key={idx} className="flex justify-between text-sm">
-                             <span className={item.available ? "text-gray-700" : "text-red-400 line-through"}>{item.name} (x{item.quantity})</span>
-                             <span className="text-gray-500">{item.available ? `Kz ${item.price}` : 'Indisp.'}</span>
-                          </div>
-                        ))}
-                        <div className="flex justify-between text-xs text-gray-400 border-t border-gray-100 pt-1 mt-1">
-                           <span>Entrega</span>
-                           <span>Kz {quote.deliveryFee}</span>
+                <div className="grid gap-4">
+                    {req.quotes?.map(quote => (
+                    <div key={quote.id} className={`bg-white p-5 rounded-[32px] border-2 shadow-sm relative overflow-hidden transition-all ${quote.status === 'ACCEPTED' ? 'border-emerald-500 ring-4 ring-emerald-50' : 'border-gray-100'} ${quote.status === 'REJECTED' ? 'opacity-60 grayscale' : ''}`}>
+                        {quote.status === 'ACCEPTED' && <div className="absolute top-0 right-0 bg-emerald-500 text-white text-[9px] px-4 py-1.5 rounded-bl-2xl font-black uppercase">VENCEDORA</div>}
+                        {quote.status === 'REJECTED' && <div className="absolute top-0 right-0 bg-gray-400 text-white text-[9px] px-4 py-1.5 rounded-bl-2xl font-black uppercase">FECHADA</div>}
+                        
+                        <div className="flex justify-between items-start mb-4">
+                            <div>
+                                <div className="flex items-center gap-2 mb-1">
+                                    <Store className="text-blue-500" size={16}/>
+                                    <span className="font-black text-gray-800">{quote.pharmacyName}</span>
+                                </div>
+                                <p className="text-[9px] font-bold text-gray-400 uppercase flex items-center gap-1">
+                                    <Clock size={10}/> Respondido em {new Date(quote.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                </p>
+                            </div>
+                            {quote.status !== 'REJECTED' && <span className="text-xl font-black text-emerald-600">Kz {quote.totalPrice.toLocaleString()}</span>}
                         </div>
-                     </div>
-                     {quote.notes && <div className="bg-yellow-50 text-yellow-800 text-xs p-2 rounded mb-3">{quote.notes}</div>}
-                     
-                     {req.status !== 'Concluído' && (
-                        <Button 
-                            onClick={() => handleAcceptQuote(quote)} 
-                            className="w-full py-2 text-sm"
-                            disabled={!!processingQuoteId} // Desabilita se qualquer um estiver processando
-                        >
-                            {processingQuoteId === quote.id ? (
-                                <span className="flex items-center justify-center gap-2"><Loader2 className="animate-spin" size={16}/> Processando...</span>
-                            ) : "Aceitar Oferta"}
-                        </Button>
-                     )}
-                  </div>
-                ))}
+
+                        {quote.status === 'REJECTED' ? (
+                            <div className="bg-gray-50 p-3 rounded-2xl border border-gray-100">
+                                <p className="text-[10px] text-gray-500 font-bold italic">
+                                    {quote.rejectionReason || "Este orçamento não está mais disponível."}
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="space-y-2 mb-4 bg-gray-50/50 p-4 rounded-2xl">
+                                {quote.items.map((item, idx) => (
+                                <div key={idx} className="flex justify-between text-xs">
+                                    <span className={item.available ? "text-gray-700 font-medium" : "text-red-400 line-through"}>{item.quantity}x {item.name}</span>
+                                    <span className="text-gray-500 font-mono font-bold">{item.available ? `Kz ${item.price.toLocaleString()}` : 'Indisponível'}</span>
+                                </div>
+                                ))}
+                                <div className="flex justify-between text-[10px] text-blue-600 border-t border-gray-100 pt-2 mt-2 font-black uppercase tracking-tighter">
+                                    <span>Taxa de Entrega</span>
+                                    <span>Kz {quote.deliveryFee.toLocaleString()}</span>
+                                </div>
+                            </div>
+                        )}
+                        
+                        {quote.notes && quote.status !== 'REJECTED' && (
+                            <div className="mb-4 flex items-start gap-2 bg-yellow-50 p-3 rounded-2xl border border-yellow-100">
+                                <Info size={14} className="text-yellow-600 shrink-0 mt-0.5"/>
+                                <p className="text-[10px] text-yellow-800 font-medium leading-relaxed">{quote.notes}</p>
+                            </div>
+                        )}
+                        
+                        {req.status !== 'COMPLETED' && quote.status !== 'REJECTED' && (
+                            <div className="flex gap-3">
+                                <Button 
+                                    onClick={() => handleAcceptQuote(quote)} 
+                                    className="flex-[3] py-4 text-xs font-black shadow-lg shadow-emerald-100"
+                                    disabled={!!processingQuoteId} 
+                                >
+                                    {processingQuoteId === quote.id ? <Loader2 className="animate-spin" size={16}/> : "ACEITAR ESTA OFERTA"}
+                                </Button>
+                                <Button 
+                                    onClick={() => handleRejectQuote(quote.id)} 
+                                    variant="danger"
+                                    className="flex-1 py-4 text-xs font-black bg-red-50 !text-red-500 border-2 border-red-100 hover:!bg-red-500 hover:!text-white transition-all"
+                                    disabled={!!processingQuoteId} 
+                                    title="Negar"
+                                >
+                                    <X size={18}/>
+                                </Button>
+                            </div>
+                        )}
+                    </div>
+                    ))}
+                </div>
              </div>
            )}
         </Card>

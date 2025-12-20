@@ -2,132 +2,151 @@
 import { supabase } from './supabaseClient';
 import { Pharmacy, PharmacyInput, PharmacyFinancials, User, OrderStatus } from '../types';
 
-export const recoverPharmacyLink = async (user: User): Promise<boolean> => {
+export const recoverPharmacyLink = async (user: User): Promise<string | null> => {
     try {
-        const { data: existing } = await supabase.from('pharmacies').select('id').eq('owner_email', user.email).single();
+        console.log("Iniciando recuperação de vínculo para:", user.email);
+        
+        // 1. Verifica se já existe uma farmácia com este email de dono
+        const { data: existing } = await supabase
+            .from('pharmacies')
+            .select('id')
+            .eq('owner_email', user.email)
+            .maybeSingle();
+            
         let pharmId = existing?.id;
 
+        // 2. Se não existir na tabela 'pharmacies', cria agora
         if (!pharmId) {
-             const { data: newPharm, error } = await supabase.from('pharmacies').insert([{
+             const { data: newPharm, error: createError } = await supabase.from('pharmacies').insert([{
                 name: `Farmácia de ${user.name}`,
                 status: 'PENDING',
                 owner_email: user.email,
                 is_available: false,
                 address: 'Pendente de Configuração',
                 rating: 5.0,
-                delivery_fee: 0,
+                delivery_fee: 600,
+                min_time: '35 min',
                 commission_rate: 10
             }]).select().single();
             
-            if (error || !newPharm) throw new Error("Falha ao criar farmácia");
-            pharmId = newPharm.id;
+            if (createError) throw createError;
+            pharmId = newPharm?.id;
         }
 
-        const { error: profileError } = await supabase.from('profiles').update({ pharmacy_id: pharmId }).eq('id', user.id);
-        if (profileError) throw profileError;
-
-        return true;
-    } catch (e) {
-        console.error("Recovery failed", e);
-        return false;
+        // 3. Atualiza o perfil do usuário para apontar para este ID (mesmo que ele já tivesse um ID antigo/inválido)
+        if (pharmId) {
+            const { error: updateError } = await supabase
+                .from('profiles')
+                .update({ pharmacy_id: pharmId })
+                .eq('id', user.id);
+                
+            if (updateError) throw updateError;
+            return pharmId;
+        }
+        
+        return null;
+    } catch (e) { 
+        console.error("Erro crítico ao recuperar vínculo:", e);
+        return null; 
     }
 }
 
-export const getAdminStats = async () => {
-    const { count: users } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
-    const { count: pharmacies } = await supabase.from('pharmacies').select('*', { count: 'exact', head: true });
-    
-    const { data: orders } = await supabase.from('orders').select('total');
-    const totalRevenue = orders?.reduce((acc, curr) => acc + (curr.total || 0), 0) || 0;
-    const ordersToday = orders?.length || 0;
-
-    return { users: users || 0, pharmacies: pharmacies || 0, ordersToday: ordersToday, totalRevenue: totalRevenue };
-};
-
-export const checkSystemHealth = async () => {
-    try { const { error } = await supabase.from('pharmacies').select('id').limit(1); return !error; } catch { return false; }
-};
-
 export const fetchPharmacies = async (isAdmin: boolean = false): Promise<Pharmacy[]> => {
   let query = supabase.from('pharmacies').select('*');
-  if (!isAdmin) {
-    query = query.eq('status', 'APPROVED');
-  }
+  if (!isAdmin) query = query.eq('status', 'APPROVED');
   const { data } = await query;
   return (data || []).map((p: any) => ({
     id: p.id,
     name: p.name,
     nif: p.nif,
-    address: p.address || 'Endereço não informado',
+    address: p.address || 'Pendente',
     rating: p.rating,
     deliveryFee: p.delivery_fee,
-    minTime: p.min_time || '30-45 min',
+    minTime: p.min_time,
     isAvailable: p.is_available,
-    distance: '2.5 km', 
     status: p.status,
     ownerEmail: p.owner_email,
     commissionRate: p.commission_rate,
-    phone: p.phone 
+    phone: p.phone,
+    distance: 'N/A'
   }));
 };
 
 export const fetchPharmacyById = async (id: string): Promise<Pharmacy | null> => {
-    const { data } = await supabase.from('pharmacies').select('*').eq('id', id).single();
-    if (!data) return null;
-    return {
-        id: data.id,
-        name: data.name,
-        nif: data.nif,
-        address: data.address,
-        rating: data.rating,
-        deliveryFee: data.delivery_fee,
-        minTime: data.min_time,
-        isAvailable: data.is_available,
-        distance: 'N/A',
-        status: data.status,
-        ownerEmail: data.owner_email,
-        commissionRate: data.commission_rate,
-        phone: data.phone 
+  const { data, error } = await supabase.from('pharmacies').select('*').eq('id', id).single();
+  if (error || !data) return null;
+  return {
+    id: data.id, name: data.name, nif: data.nif, address: data.address || 'Pendente',
+    rating: data.rating, deliveryFee: data.delivery_fee, minTime: data.min_time,
+    isAvailable: data.is_available, status: data.status, ownerEmail: data.owner_email,
+    commissionRate: data.commission_rate, phone: data.phone, distance: 'N/A'
+  };
+};
+
+export const updatePharmacyDetails = async (id: string, input: PharmacyInput): Promise<boolean> => {
+  const { error } = await supabase.from('pharmacies').update({
+    name: input.name, nif: input.nif, address: input.address,
+    delivery_fee: input.deliveryFee, min_time: input.minTime, phone: input.phone
+  }).eq('id', id);
+  return !error;
+};
+
+export const togglePharmacyAvailability = async (id: string, isAvailable: boolean): Promise<boolean> => {
+  const { error = null } = await supabase.from('pharmacies').update({ is_available: isAvailable }).eq('id', id);
+  return !error;
+};
+
+export const approvePharmacy = async (id: string): Promise<{success: boolean, error?: string}> => {
+    try {
+        const { error } = await supabase
+            .from('pharmacies')
+            .update({ status: 'APPROVED' })
+            .eq('id', id);
+
+        if (error) return { success: false, error: error.message };
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e.message || "Erro de conexão" };
+    }
+};
+
+export const deletePharmacy = async (id: string): Promise<boolean> => {
+    const { error } = await supabase.from('pharmacies').delete().eq('id', id);
+    return !error;
+};
+
+export const resetPharmacyData = async (pharmacyId: string): Promise<boolean> => {
+    try {
+        // 1. Volta para PENDING (precisará de aprovação do Admin)
+        // 2. Desativa visibilidade
+        // 3. Limpa produtos
+        await supabase.from('pharmacies').update({ status: 'PENDING', is_available: false }).eq('id', pharmacyId);
+        await supabase.from('products').delete().eq('pharmacy_id', pharmacyId);
+        return true;
+    } catch (e) {
+        return false;
+    }
+};
+
+export const getAdminStats = async () => {
+    const { count: u } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
+    const { count: p } = await supabase.from('pharmacies').select('*', { count: 'exact', head: true });
+    
+    const today = new Date().toISOString().split('T')[0];
+    const { data: ordersToday } = await supabase
+        .from('orders')
+        .select('total')
+        .gte('created_at', today);
+
+    const totalRevenue = (ordersToday || []).reduce((acc, o) => acc + (Number(o.total) || 0), 0);
+    
+    return { 
+        users: u || 0, 
+        pharmacies: p || 0, 
+        ordersToday: ordersToday?.length || 0, 
+        totalRevenue: totalRevenue 
     };
 };
-
-export const updatePharmacyDetails = async (id: string, data: PharmacyInput): Promise<boolean> => {
-    const { error } = await supabase.from('pharmacies').update({
-        name: data.name,
-        nif: data.nif,
-        address: data.address,
-        delivery_fee: data.deliveryFee,
-        min_time: data.minTime,
-        phone: data.phone, 
-        status: 'APPROVED' // Garante que ao salvar configs, se mantenha aprovada
-    }).eq('id', id);
-    return !error;
-};
-
-// --- NOVA FUNÇÃO: Alternar Status Online/Offline ---
-export const togglePharmacyAvailability = async (id: string, isAvailable: boolean): Promise<boolean> => {
-    const { error } = await supabase.from('pharmacies').update({ is_available: isAvailable }).eq('id', id);
-    return !error;
-}
-
-export const approvePharmacy = async (id: string): Promise<boolean> => {
-    const { error } = await supabase.from('pharmacies').update({ status: 'APPROVED' }).eq('id', id);
-    return !error;
-};
-
-// Rejeitar solicitação (Delete)
-export const denyPharmacy = async (id: string): Promise<boolean> => {
-    const { error } = await supabase.from('pharmacies').delete().eq('id', id);
-    return !error;
-};
-
-// Excluir farmácia ativa (Delete - mesmo lógica, nome semântico para o admin)
-export const deletePharmacy = async (id: string): Promise<boolean> => {
-    // Nota: Produtos e Pedidos podem ficar órfãos se não houver CASCADE no banco.
-    // O ideal seria limpar produtos antes, mas o delete direto resolve a exigência imediata.
-    const { error } = await supabase.from('pharmacies').delete().eq('id', id);
-    return !error;
-}
 
 export const updatePharmacyCommission = async (id: string, rate: number): Promise<boolean> => {
     const { error } = await supabase.from('pharmacies').update({ commission_rate: rate }).eq('id', id);
@@ -135,60 +154,37 @@ export const updatePharmacyCommission = async (id: string, rate: number): Promis
 };
 
 export const fetchFinancialReport = async (): Promise<PharmacyFinancials[]> => {
-    const { data: pharmacies } = await supabase.from('pharmacies').select('*');
-    if (!pharmacies) return [];
+    try {
+        const { data: pharmacies } = await supabase.from('pharmacies').select('*');
+        if (!pharmacies) return [];
+        const { data: orders } = await supabase.from('orders').select('*');
+        const allOrders = orders || [];
 
-    const { data: orders } = await supabase.from('orders').select('*');
-    const allOrders = orders || [];
+        return pharmacies.map((p: any) => {
+            const pharmOrders = allOrders.filter(o => o.pharmacy_id === p.id);
+            const completedOrders = pharmOrders.filter(o => o.status === 'Concluído');
+            const pendingOrders = pharmOrders.filter(o => o.status !== 'Concluído' && o.status !== 'Cancelado');
+            const totalSales = completedOrders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
+            const platformFees = completedOrders.reduce((acc, o) => {
+                if (o.commission_amount !== undefined && o.commission_amount !== null) return acc + Number(o.commission_amount);
+                return acc + (Number(o.total) * (p.commission_rate || 10) / 100);
+            }, 0);
+            const pendingValue = pendingOrders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
 
-    return pharmacies.map((p: any) => {
-        const pharmOrders = allOrders.filter((o: any) => o.pharmacy_id === p.id);
-        
-        // CORREÇÃO CRÍTICA: Comparar com o valor do Enum (string 'Concluído') e não a chave 'COMPLETED'
-        const completedOrders = pharmOrders.filter((o: any) => o.status === OrderStatus.COMPLETED);
-        
-        const pendingOrders = pharmOrders.filter((o: any) => 
-            o.status !== OrderStatus.COMPLETED && 
-            o.status !== OrderStatus.CANCELLED && 
-            o.status !== OrderStatus.REJECTED
-        );
-        
-        const totalSales = completedOrders.reduce((acc: number, o: any) => acc + (Number(o.total) || 0), 0);
-        const commissionRate = p.commission_rate || 10;
-        
-        const platformFees = completedOrders.reduce((acc: number, o: any) => {
-            const recordedCommission = Number(o.commission_amount);
-            // Se existir comissão gravada no pedido, usa ela. Se não, calcula baseada na taxa atual.
-            if (!isNaN(recordedCommission) && recordedCommission > 0) {
-                return acc + recordedCommission;
-            } else {
-                return acc + ((Number(o.total) * commissionRate) / 100);
-            }
-        }, 0);
-
-        const netEarnings = totalSales - platformFees;
-        const pendingClearance = pendingOrders.reduce((acc: number, o: any) => acc + (Number(o.total) || 0), 0);
-
-        return {
-            id: p.id,
-            name: p.name,
-            nif: p.nif,
-            address: p.address,
-            rating: p.rating,
-            deliveryFee: p.delivery_fee,
-            minTime: p.min_time,
-            isAvailable: p.is_available,
-            distance: 'N/A',
-            status: p.status,
-            ownerEmail: p.owner_email,
-            commissionRate: commissionRate,
-            phone: p.phone,
-            stats: {
-                totalSales,
-                platformFees,
-                netEarnings,
-                pendingClearance
-            }
-        };
-    });
+            return {
+                id: p.id,
+                name: p.name,
+                commissionRate: p.commission_rate || 10,
+                stats: {
+                    totalSales: totalSales,
+                    platformFees: platformFees,
+                    netEarnings: totalSales - platformFees,
+                    pendingClearance: pendingValue
+                }
+            };
+        });
+    } catch (e) {
+        console.error("Erro ao gerar relatório financeiro:", e);
+        return [];
+    }
 };

@@ -20,7 +20,8 @@ export const signUpPartner = async (name: string, email: string, password: strin
         is_available: false,
         address: 'Pendente de Configuração',
         rating: 5.0,
-        delivery_fee: 0,
+        delivery_fee: 600, // Padrão solicitado
+        min_time: '35 min', // Padrão solicitado
         commission_rate: 10
     }]).select().single();
 
@@ -175,6 +176,16 @@ export const adminUpdateUser = async (userId: string, data: { name: string, phon
     return { success: false, error: error.message };
   }
 }
+
+export const resetCustomerData = async (userId: string, customerName: string): Promise<boolean> => {
+    try {
+        await supabase.from('prescriptions').delete().eq('customer_id', userId);
+        await supabase.from('orders').delete().eq('customer_name', customerName);
+        return true;
+    } catch (e) {
+        return false;
+    }
+};
 
 export const fetchAllUsers = async (): Promise<User[]> => {
     const { data } = await supabase.from('profiles').select('*');

@@ -4,3 +4,52 @@ gostaria que tu implementasses todos elementos essenciais básicos para o sitema
 completo e já conseguir realizar as operações que ele está destinado a realizar, 
 desde cadastrar empresas (todos os dados necessários da farmácia deve constar no formulario, 
 isso inclui NIF), adicionar registar medicamento em 
+
+
+carrossel permições:
+DROP POLICY IF EXISTS "Public Slides" ON carousel_slides;
+CREATE POLICY "Public Slides" ON carousel_slides FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public Partners" ON partners;
+CREATE POLICY "Public Partners" ON partners FOR ALL USING (true) WITH CHECK (true);
+
+
+Memoria para codificação no AI Studio
+
+
+--
+
+Como enginheiro sênior que tu és, como farias para transformar o "Ferramentas 
+ou função que pretendes transformar" numa "função que pretendes tornar" profissional de nível industrial
+
+(Panadol (Paracetamol), 500mg, Comprimido, 20 Unidades, GSK) para o campo interno de Nome_Unico_do_Sistema
+Panadol, 500mg, comprimido, 20 Unidades
+
+Problemas com FARMÁCIAS
+ IA:
+Esta é uma situação clássica de "Inconsistência de Vínculo". O que aconteceu foi o seguinte: 
+o utilizador tem o cargo (role) de "PHARMACY" na tabela de perfis, mas por algum motivo 
+(falha de rede no registo ou alteração manual), não foi criada a entrada correspondente na tabela de pharmacies.
+Como a aba "Farmácias" lê apenas a tabela de farmácias, essa conta fica "invisível" para aprovação.
+Vou adicionar um Botão de Reparação Crítica na lista de Usuários do Admin. 
+Se o sistema detetar um usuário que é "Farmácia" mas não tem o vínculo, aparecerá um 
+botão para "Gerar Registo de Farmácia", forçando a criação da entrada necessária para que ela apareça na lista de aprovação.
+
+
+--
+
+PROMPROPTS VALIOSOS
+
+- lembra-te: sem alterar outra funcionalidade ou estética geral alem do pedido especifico que faço
+
+
+
+
+
+
+
+
+ao registar o produto, para o admin e para farmácia o produto vai aparecer o nome completo: 
+(Panadol (Paracetamol), 500mg, Comprimido, 20 Unidades, GSK), mas para o cliente, 
+vai aparecer simplesmente o primeiro nome, miligrama, Forma Farmacêutica 
+e a quantidade na embalagem, caixinha, lámina E.: Panadol, 500mg, comprimido, 20 Unidades
