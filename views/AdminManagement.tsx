@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Card, Badge, Toast, Button } from '../components/UI';
 import { Pharmacy, User, UserRole } from '../types';
@@ -91,40 +90,42 @@ export const AdminUserManagement = () => {
             </div>
 
             <Card className="p-0 overflow-hidden shadow-sm">
-                <table className="w-full text-left text-sm">
-                    <thead className="bg-gray-50 border-b text-[10px] uppercase font-black text-gray-400 tracking-widest">
-                        <tr><th className="p-5">Perfil</th><th className="p-5">Cargo</th><th className="p-5 text-right">Ação</th></tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100 bg-white">
-                        {filtered.map(u => (
-                            <tr key={u.id} className="hover:bg-gray-50 transition-colors">
-                                <td className="p-5">
-                                    <div className="flex items-center gap-3">
-                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black ${u.role === 'PHARMACY' ? 'bg-emerald-100 text-emerald-700' : (u.role === 'ADMIN' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700')}`}>
-                                            {u.name.charAt(0)}
+                <div className="overflow-x-auto custom-scrollbar">
+                    <table className="w-full text-left text-sm min-w-[700px]">
+                        <thead className="bg-gray-50 border-b text-[10px] uppercase font-black text-gray-400 tracking-widest">
+                            <tr><th className="p-5">Perfil</th><th className="p-5">Cargo</th><th className="p-5 text-right">Ação</th></tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 bg-white">
+                            {filtered.map(u => (
+                                <tr key={u.id} className="hover:bg-gray-50 transition-colors">
+                                    <td className="p-5">
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black shrink-0 ${u.role === 'PHARMACY' ? 'bg-emerald-100 text-emerald-700' : (u.role === 'ADMIN' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700')}`}>
+                                                {u.name.charAt(0)}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className="font-bold text-gray-800 truncate max-w-[200px]">{u.name}</p>
+                                                <p className="text-xs text-gray-400 truncate max-w-[200px]">{u.email}</p>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <p className="font-bold text-gray-800">{u.name}</p>
-                                            <p className="text-xs text-gray-400">{u.email}</p>
+                                    </td>
+                                    <td className="p-5">
+                                        <Badge color={u.role === 'ADMIN' ? 'red' : (u.role === 'PHARMACY' ? 'green' : 'blue')}>{u.role}</Badge>
+                                    </td>
+                                    <td className="p-5 text-right">
+                                        <div className="flex items-center justify-end gap-2">
+                                            {u.role === 'PHARMACY' && (
+                                                <button onClick={() => handleRepairLink(u)} className="p-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-md flex items-center gap-2 text-[10px] font-black" title="Reparar Vínculo de Loja"><Link2 size={14}/> VINCULAR</button>
+                                            )}
+                                            <button onClick={() => setEditing(u)} className="p-3 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all"><UserCog size={18}/></button>
+                                            <button onClick={() => handleReset(u)} className="p-3 bg-gray-50 text-gray-400 rounded-xl hover:bg-gray-600 hover:text-white transition-all" title="Reiniciar Dados do Cliente"><RotateCcw size={18}/></button>
                                         </div>
-                                    </div>
-                                </td>
-                                <td className="p-5">
-                                    <Badge color={u.role === 'ADMIN' ? 'red' : (u.role === 'PHARMACY' ? 'green' : 'blue')}>{u.role}</Badge>
-                                </td>
-                                <td className="p-5 text-right">
-                                    <div className="flex items-center justify-end gap-2">
-                                        {u.role === 'PHARMACY' && (
-                                            <button onClick={() => handleRepairLink(u)} className="p-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-md flex items-center gap-2 text-[10px] font-black" title="Reparar Vínculo de Loja"><Link2 size={14}/> VINCULAR</button>
-                                        )}
-                                        <button onClick={() => setEditing(u)} className="p-3 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all"><UserCog size={18}/></button>
-                                        <button onClick={() => handleReset(u)} className="p-3 bg-gray-50 text-gray-400 rounded-xl hover:bg-gray-600 hover:text-white transition-all" title="Reiniciar Dados do Cliente"><RotateCcw size={18}/></button>
-                                    </div>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             </Card>
 
             {editing && (
@@ -261,7 +262,7 @@ export const AdminPharmacyManagement = () => {
                 {filtered.map(p => (
                     <div key={p.id} className={`bg-white p-5 rounded-3xl border shadow-sm flex flex-col md:flex-row items-center justify-between gap-6 hover:shadow-md transition-all ${p.status === 'BLOCKED' ? 'opacity-70 grayscale' : ''}`}>
                         <div className="flex items-center gap-4 w-full md:w-auto">
-                            <div className="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-2xl border shadow-inner bg-emerald-50 text-emerald-700">{p.name.charAt(0)}</div>
+                            <div className="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-2xl border shadow-inner bg-emerald-50 text-emerald-700 shrink-0">{p.name.charAt(0)}</div>
                             <div className="min-w-0">
                                 <h3 className="font-bold text-gray-800 text-lg truncate max-w-[250px]">{p.name}</h3>
                                 <div className="flex flex-wrap gap-2 mt-1">

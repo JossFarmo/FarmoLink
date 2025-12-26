@@ -53,3 +53,79 @@ ao registar o produto, para o admin e para farmácia o produto vai aparecer o no
 (Panadol (Paracetamol), 500mg, Comprimido, 20 Unidades, GSK), mas para o cliente, 
 vai aparecer simplesmente o primeiro nome, miligrama, Forma Farmacêutica 
 e a quantidade na embalagem, caixinha, lámina E.: Panadol, 500mg, comprimido, 20 Unidades
+
+
+--
+
+projeto no ar
+
+https://farmolink.vercel.app/
+
+---
+
+
+
+Gostaria de uma explicação detalhada sobre o que o sistema faz, como 
+se stivesses a explicar pra alguém para o fazer novamente.
+
+
+Para reconstruir o FarmoLink do zero, você precisa entender que ele não é apenas um site de vendas, 
+mas sim um ecossistema tripartite (Cliente, Farmácia e Administrador) focado em resolver a fragmentação do mercado farmacêutico em Angola.
+Aqui está o "blueprint" (plano de construção) detalhado:
+1. A Arquitetura Base (O Esqueleto)
+O sistema foi construído para ser leve e independente de servidores pesados.
+Frontend: React (via ESM.sh) para evitar processos de compilação lentos.
+Backend (BaaS): Supabase gerencia tudo: Autenticação, Banco de Dados Relacional (PostgreSQL) 
+e escuta de eventos em tempo real.
+Processamento de Imagem: Cloudinary. Receitas médicas são fotos pesadas; o sistema faz o upload 
+para a nuvem e salva apenas o link no banco, garantindo que o app não fique lento.
+Inteligência de Dados: Gemini (IA). Ele é usado para converter nomes industriais complexos 
+(ex: Panadol 500mg Comp. GSK) em nomes amigáveis para o cliente.
+
+2. O Fluxo dos Três Pilares (Os Perfis)
+A. O Lado do Cliente (Experiência de Compra)
+Shopping Direto: O usuário navega por produtos de várias farmácias, adiciona ao carrinho e finaliza.
+O "Motor de Cotação" (Diferencial): Em vez de procurar remédio por remédio, o cliente tira foto da receita. 
+O sistema envia essa foto para as farmácias selecionadas.
+Escolha de Orçamento: O cliente recebe várias propostas de preços diferentes para a mesma receita e escolhe a melhor.
+B. O Lado da Farmácia (Painel de Gestão)
+Gestão de Inventário: A farmácia pode cadastrar produtos um a um ou importar listas industriais inteiras de uma vez.
+Operação de Pedidos: Recebe alertas sonoros e visuais de novos pedidos. O gestor altera o status 
+(Pendente -> Preparando -> Entrega -> Concluído) e o cliente vê isso em tempo real.
+Módulo de Cotação: A farmácia abre a foto da receita enviada pelo cliente, identifica os produtos no seu estoque e envia um valor total.
+C. O Lado do Administrador (Governança)
+Catálogo Mestre: O Admin mantém uma lista "global" de medicamentos para garantir que as farmácias sigam um padrão de nomes.
+Controle de Acesso: Aprova ou bloqueia farmácias (sistema de parceria).
+Segurança e Backup: O sistema possui um "Cofre" onde o Admin pode baixar todos os dados do país inteiro em um arquivo JSON e restaurar se necessário.
+3. Processos Técnicos Críticos (Como fazer novamente)
+O Banco de Dados (SQL)
+Você deve criar tabelas que se conectam:
+profiles: Guarda quem é cliente, quem é dono de farmácia e quem é admin.
+pharmacies: Detalhes de NIF, endereço e taxa de entrega.
+products: Vinculados a uma farmácia específica.
+prescriptions e prescription_quotes: Onde a mágica da cotação acontece.
+Sincronização Natural (Polling)
+Para o sistema parecer "vivo" sem usar WebSockets complexos (que podem cair em conexões 3G/4G), 
+o sistema usa um Polling de 15 segundos. Ele pergunta ao Supabase: "Há algo novo?" silenciosamente. 
+Se houver um pedido novo, ele toca um som de notificação.
+Resiliência de Conexão
+O segredo da estabilidade que recuperamos é o InitAuth Silencioso. O app carrega a interface primeiro 
+e tenta conectar ao banco em segundo plano. Se o banco demorar 2 segundos para responder, o usuário 
+vê um loader elegante em vez de uma tela de erro.
+4. O "Segredo" da UX (Experiência do Usuário)
+Sons: Cada clique importante (comprar, salvar, erro) tem um feedback sonoro para dar sensação de um sistema robusto.
+Cores (Emerald): O uso do verde esmeralda passa confiança e saúde.
+Mobile-First: Tudo foi desenhado para funcionar perfeitamente no telemóvel, já que é onde a foto da receita é tirada.
+Resumo para o Desenvolvedor: Se fores fazer de novo, foca na tabela de cotações. 
+É ela que torna o FarmoLink diferente de um e-commerce comum, transformando-o num marketplace de serviços de saúde.
+
+
+--
+
+site:
+farmolink.vercel.app
+
+
+
+
+

@@ -3,58 +3,56 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Header } from './Layout';
 import { Button } from './UI';
 import { CarouselSlide, Partner } from '../types';
-import { ArrowRight, ChevronLeft, ChevronRight, Upload, Search, MapPin, ShieldCheck, Clock, Heart, Zap } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, Upload, Search, MapPin, Loader2, Pill } from 'lucide-react';
 import { fetchLandingContent } from '../services/dataService';
 
 interface LandingPageProps {
     onLoginClick: () => void;
 }
 
-// Fallback slides caso o DB esteja vazio
+// Banners padrão para garantir que o carrossel sempre apareça
 const DEFAULT_SLIDES: CarouselSlide[] = [
     {
-        id: 'def-1',
-        title: 'Sua farmácia digital, conectada e acessível.',
-        subtitle: 'Encontre medicamentos, compare preços e envie receitas para as melhores farmácias da sua região.',
-        imageUrl: 'https://images.unsplash.com/photo-1631549916768-4119b2d5f926?q=80&w=2079&auto=format&fit=crop',
-        buttonText: 'Buscar Medicamentos',
+        id: 'default-1',
+        title: 'A maior rede de farmácias online de Angola',
+        subtitle: 'Compare preços, envie receitas e receba seus medicamentos no conforto de casa.',
+        imageUrl: 'https://images.unsplash.com/photo-1586015555751-63bb77f4322a?q=80&w=2070&auto=format&fit=crop',
+        buttonText: 'Começar Agora',
         order: 1
     },
     {
-        id: 'def-2',
-        title: 'Envie sua Receita Médica em segundos.',
-        subtitle: 'Tire uma foto e receba orçamentos de várias farmácias sem sair de casa.',
-        imageUrl: 'https://images.unsplash.com/photo-1576091160550-217358c7e618?q=80&w=2070&auto=format&fit=crop',
+        id: 'default-2',
+        title: 'Envie sua Receita Médica',
+        subtitle: 'Tire uma foto e receba orçamentos de várias farmácias em Luanda e outras províncias.',
+        imageUrl: 'https://images.unsplash.com/photo-1576091160550-2173dba999ef?q=80&w=2070&auto=format&fit=crop',
         buttonText: 'Enviar Receita',
         order: 2
-    },
-    {
-        id: 'def-3',
-        title: 'Entregas rápidas e seguras.',
-        subtitle: 'Receba seus produtos no conforto do seu lar com rastreamento em tempo real.',
-        imageUrl: 'https://images.unsplash.com/photo-1618498082410-b4aa22193b38?q=80&w=2070&auto=format&fit=crop',
-        buttonText: 'Começar Agora',
-        order: 3
     }
 ];
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
-    const [slides, setSlides] = useState<CarouselSlide[]>([]);
+    const [slides, setSlides] = useState<CarouselSlide[]>(DEFAULT_SLIDES);
     const [partners, setPartners] = useState<Partner[]>([]);
+    const [loading, setLoading] = useState(true);
     const [currentSlide, setCurrentSlide] = useState(0);
     const [isPaused, setIsPaused] = useState(false);
     const timeoutRef = useRef<any>(null);
 
     useEffect(() => {
         const loadContent = async () => {
-            const content = await fetchLandingContent();
-            // Use defaults if DB is empty
-            if (content.slides.length > 0) {
-                setSlides(content.slides);
-            } else {
-                setSlides(DEFAULT_SLIDES);
+            setLoading(true);
+            try {
+                const content = await fetchLandingContent();
+                // Se o banco retornar slides, usamos eles. Se não, mantemos os padrões.
+                if (content.slides && content.slides.length > 0) {
+                    setSlides(content.slides);
+                }
+                setPartners(content.partners || []);
+            } catch (e) {
+                console.error("Erro ao carregar conteúdo dinâmico:", e);
+            } finally {
+                setLoading(false);
             }
-            setPartners(content.partners);
         };
         loadContent();
     }, []);
@@ -64,11 +62,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
     }
 
     useEffect(() => {
-        if (isPaused || slides.length === 0) return;
+        if (isPaused || slides.length <= 1) return;
         resetTimeout();
         timeoutRef.current = setTimeout(() => {
             setCurrentSlide((prev) => (prev === slides.length - 1 ? 0 : prev + 1));
-        }, 5000);
+        }, 60000); // 6 segundos por slide
 
         return () => resetTimeout();
     }, [currentSlide, isPaused, slides.length]);
@@ -81,46 +79,43 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
         setCurrentSlide(currentSlide === 0 ? slides.length - 1 : currentSlide - 1);
     }
 
-    // Safety check: if slides is empty (shouldn't happen with defaults), show loader
-    if (slides.length === 0) return <div className="min-h-screen flex items-center justify-center">Carregando...</div>;
-
     return (
-        <div className="font-sans text-gray-900 bg-white">
-            {/* Header Global (Sólido) */}
+        <div className="font-sans text-gray-900 bg-white min-h-screen">
             <Header 
                 currentPage="landing" 
                 setPage={() => {}} 
                 onLoginClick={onLoginClick}
             />
 
-            {/* --- HERO CAROUSEL (Fixed Height for Visibility) --- */}
+            {/* CARROSSEL PRINCIPAL - SEMPRE VISÍVEL */}
             <div 
-                className="relative h-[450px] md:h-[550px] w-full overflow-hidden bg-gray-900 text-white mt-[64px]" // mt-[64px] compensa o header fixo
+                className="relative h-[500px] md:h-[650px] w-full overflow-hidden bg-gray-900 text-white mt-[64px]"
                 onMouseEnter={() => setIsPaused(true)}
                 onMouseLeave={() => setIsPaused(false)}
             >
-                {/* Slides */}
                 <div 
-                    className="flex transition-transform duration-700 ease-in-out h-full"
+                    className="flex transition-transform duration-1000 ease-in-out h-full"
                     style={{ transform: `translateX(-${currentSlide * 100}%)` }}
                 >
-                    {slides.map((slide, idx) => (
+                    {slides.map((slide) => (
                         <div key={slide.id} className="min-w-full h-full relative">
-                            {/* Background Image with Darker Overlay for better text contrast */}
-                            <div className="absolute inset-0 bg-black/50 z-10"></div>
+                            <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/40 to-transparent z-10"></div>
                             <img src={slide.imageUrl} alt={slide.title} className="w-full h-full object-cover" />
                             
-                            {/* Content - CENTERED ALIGNMENT (REVERTED) */}
-                            <div className="absolute inset-0 z-20 flex items-center justify-center container mx-auto px-4 mt-8">
-                                <div className="max-w-3xl text-center space-y-4 md:space-y-6 animate-fade-in-up">
-                                    <h2 className="text-3xl md:text-5xl font-bold tracking-tight leading-tight">{slide.title}</h2>
-                                    <p className="text-base md:text-xl text-gray-200 opacity-90 max-w-2xl mx-auto">{slide.subtitle}</p>
+                            <div className="absolute inset-0 z-20 flex items-center container mx-auto px-6 md:px-12">
+                                <div className="max-w-2xl text-left space-y-6 animate-fade-in">
+                                    <h2 className="text-4xl md:text-6xl font-black tracking-tight leading-[1.1] drop-shadow-lg">
+                                        {slide.title}
+                                    </h2>
+                                    <p className="text-lg md:text-xl text-gray-200 opacity-90 font-medium max-w-xl">
+                                        {slide.subtitle}
+                                    </p>
                                     <div className="pt-4">
                                         <button 
                                             onClick={onLoginClick}
-                                            className="px-8 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full font-bold text-base shadow-lg hover:shadow-emerald-500/50 transition-all transform hover:-translate-y-1 flex items-center gap-2 mx-auto"
+                                            className="px-10 py-5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-[24px] font-black text-lg shadow-2xl shadow-emerald-500/30 transition-all transform hover:-translate-y-1 flex items-center gap-3 active:scale-95"
                                         >
-                                            {slide.buttonText} <ArrowRight size={18}/>
+                                            {slide.buttonText} <ArrowRight size={22}/>
                                         </button>
                                     </div>
                                 </div>
@@ -129,95 +124,78 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
                     ))}
                 </div>
 
-                {/* Controls */}
-                <button onClick={prevSlide} className="absolute left-4 top-1/2 -translate-y-1/2 z-30 p-2 md:p-3 rounded-full bg-white/10 hover:bg-white/30 backdrop-blur text-white transition-all opacity-0 hover:opacity-100 md:opacity-100">
-                    <ChevronLeft size={24}/>
-                </button>
-                <button onClick={nextSlide} className="absolute right-4 top-1/2 -translate-y-1/2 z-30 p-2 md:p-3 rounded-full bg-white/10 hover:bg-white/30 backdrop-blur text-white transition-all opacity-0 hover:opacity-100 md:opacity-100">
-                    <ChevronRight size={24}/>
-                </button>
-
-                {/* Dots Indicators */}
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 flex gap-2">
-                    {slides.map((_, idx) => (
-                        <button 
-                            key={idx} 
-                            onClick={() => setCurrentSlide(idx)}
-                            className={`h-2 rounded-full transition-all duration-300 ${currentSlide === idx ? 'w-8 bg-emerald-500' : 'w-2 bg-white/50 hover:bg-white'}`}
-                        />
-                    ))}
-                </div>
+                {/* CONTROLES DO CARROSSEL */}
+                {slides.length > 1 && (
+                    <>
+                        <button onClick={prevSlide} className="absolute left-6 top-1/2 -translate-y-1/2 z-30 p-4 rounded-2xl bg-white/10 hover:bg-emerald-600 backdrop-blur-md text-white transition-all border border-white/20">
+                            <ChevronLeft size={28}/>
+                        </button>
+                        <button onClick={nextSlide} className="absolute right-6 top-1/2 -translate-y-1/2 z-30 p-4 rounded-2xl bg-white/10 hover:bg-emerald-600 backdrop-blur-md text-white transition-all border border-white/20">
+                            <ChevronRight size={28}/>
+                        </button>
+                        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-30 flex gap-3">
+                            {slides.map((_, idx) => (
+                                <button 
+                                    key={idx} 
+                                    onClick={() => setCurrentSlide(idx)}
+                                    className={`h-3 rounded-full transition-all duration-500 ${currentSlide === idx ? 'w-12 bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)]' : 'w-3 bg-white/30 hover:bg-white'}`}
+                                />
+                            ))}
+                        </div>
+                    </>
+                )}
             </div>
 
-            {/* --- FEATURES SECTION --- */}
-            <section className="py-16 bg-gray-50">
-                <div className="container mx-auto px-4">
-                    <div className="text-center max-w-2xl mx-auto mb-12">
-                        <span className="text-emerald-600 font-bold uppercase tracking-wider text-xs md:text-sm">Funcionalidades</span>
-                        <h2 className="text-2xl md:text-4xl font-bold text-gray-900 mt-2">Tudo o que você precisa</h2>
-                        <p className="text-gray-500 mt-3 text-sm md:text-base">Simplificamos o processo de cuidar da sua saúde conectando você às melhores farmácias.</p>
+            {/* SEÇÃO DE FUNCIONALIDADES */}
+            <section className="py-24 bg-gray-50">
+                <div className="container mx-auto px-6">
+                    <div className="text-center max-w-3xl mx-auto mb-16">
+                        <span className="text-emerald-600 font-black uppercase tracking-[0.3em] text-xs">Ecosistema FarmoLink</span>
+                        <h2 className="text-3xl md:text-5xl font-black text-gray-900 mt-4 tracking-tighter">Sua saúde, nossa prioridade digital.</h2>
                     </div>
 
-                    <div className="grid md:grid-cols-3 gap-6">
-                        {/* Feature 1 */}
-                        <div className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-xl transition-shadow border border-gray-100 text-center group">
-                            <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300">
-                                <Search size={28}/>
-                            </div>
-                            <h3 className="text-lg font-bold text-gray-800 mb-2">Busca Inteligente</h3>
-                            <p className="text-gray-500 leading-relaxed text-sm">
-                                Encontre medicamentos pelo nome ou princípio ativo. Compare preços em tempo real.
-                            </p>
+                    <div className="grid md:grid-cols-3 gap-8">
+                        <div className="bg-white p-10 rounded-[40px] shadow-sm border border-gray-100 hover:shadow-xl transition-all group">
+                            <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-[20px] flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><Search size={32}/></div>
+                            <h3 className="text-xl font-black text-gray-800 mb-3">Busca Inteligente</h3>
+                            <p className="text-gray-500 text-sm leading-relaxed">Compare estoques e preços de todas as farmácias parceiras em segundos.</p>
                         </div>
-
-                        {/* Feature 2 */}
-                        <div className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-xl transition-shadow border border-gray-100 text-center group">
-                            <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300">
-                                <Upload size={28}/>
-                            </div>
-                            <h3 className="text-lg font-bold text-gray-800 mb-2">Envio de Receitas</h3>
-                            <p className="text-gray-500 leading-relaxed text-sm">
-                                Tire uma foto da sua receita médica e envie para múltiplas farmácias simultaneamente.
-                            </p>
+                        <div className="bg-white p-10 rounded-[40px] shadow-sm border border-gray-100 hover:shadow-xl transition-all group">
+                            <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-[20px] flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><Upload size={32}/></div>
+                            <h3 className="text-xl font-black text-gray-800 mb-3">Receitas Digitais</h3>
+                            <p className="text-gray-500 text-sm leading-relaxed">Envie fotos de suas prescrições e receba propostas personalizadas para seu tratamento.</p>
                         </div>
-
-                        {/* Feature 3 */}
-                        <div className="bg-white p-6 rounded-2xl shadow-sm hover:shadow-xl transition-shadow border border-gray-100 text-center group">
-                            <div className="w-14 h-14 bg-orange-50 text-orange-600 rounded-2xl flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300">
-                                <MapPin size={28}/>
-                            </div>
-                            <h3 className="text-lg font-bold text-gray-800 mb-2">Entrega Rápida</h3>
-                            <p className="text-gray-500 leading-relaxed text-sm">
-                                Receba seus medicamentos no conforto da sua casa ou reserve para retirada.
-                            </p>
+                        <div className="bg-white p-10 rounded-[40px] shadow-sm border border-gray-100 hover:shadow-xl transition-all group">
+                            <div className="w-16 h-16 bg-orange-50 text-orange-600 rounded-[20px] flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><MapPin size={32}/></div>
+                            <h3 className="text-xl font-black text-gray-800 mb-3">Delivery Rápido</h3>
+                            <p className="text-gray-500 text-sm leading-relaxed">Entregas seguras em Luanda e arredores, com rastreamento em tempo real.</p>
                         </div>
                     </div>
                 </div>
             </section>
 
-            {/* --- PARTNERS SECTION --- */}
-            <section className="py-12 bg-white border-t border-gray-100">
-                <div className="container mx-auto px-4">
-                    <p className="text-center text-gray-400 font-bold uppercase text-xs tracking-widest mb-8">Parceiros que confiam no FarmoLink</p>
-                    
-                    <div className="flex flex-wrap justify-center items-center gap-8 md:gap-16 opacity-60 grayscale hover:grayscale-0 transition-all duration-500">
-                        {partners.map(partner => (
-                            <img 
-                                key={partner.id} 
-                                src={partner.logoUrl} 
-                                alt={partner.name} 
-                                className="h-10 md:h-14 object-contain hover:scale-110 transition-transform duration-300 cursor-pointer" 
-                                title={partner.name}
-                            />
-                        ))}
-                        {partners.length === 0 && <p className="text-gray-300 text-sm">Nenhum parceiro configurado.</p>}
+            {/* PARCEIROS */}
+            {partners.length > 0 && (
+                <section className="py-16 bg-white border-t border-gray-50">
+                    <div className="container mx-auto px-6">
+                        <p className="text-center text-[10px] font-black text-gray-300 uppercase tracking-[0.5em] mb-12">Algumas das maiores farmácias de Angola já estão aqui</p>
+                        <div className="flex flex-wrap justify-center items-center gap-12 md:gap-24 opacity-30 grayscale hover:grayscale-0 hover:opacity-100 transition-all duration-700">
+                            {partners.filter(p => p.active).map(p => (
+                                <img key={p.id} src={p.logoUrl} alt={p.name} className="h-10 md:h-14 object-contain" />
+                            ))}
+                        </div>
                     </div>
-                </div>
-            </section>
+                </section>
+            )}
 
-            {/* Simple Footer */}
-            <footer className="bg-white border-t border-gray-100 py-8 text-center text-gray-400 text-sm">
-                <p>&copy; {new Date().getFullYear()} FarmoLink Angola. Todos os direitos reservados.</p>
+            <footer className="bg-white border-t border-gray-100 py-12 text-center">
+                <div className="flex justify-center items-center gap-3 mb-6">
+                    <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center p-1.5 shadow-lg">
+                        <img src="https://res.cloudinary.com/dzvusz0u4/image/upload/v1765977310/wrzwildc1kqsq5skklio.png" className="w-full h-full object-contain brightness-0 invert" alt="Logo" />
+                    </div>
+                    <span className="font-black text-xl text-gray-800 tracking-tighter">FarmoLink Angola</span>
+                </div>
+                <p className="text-gray-400 text-xs font-bold uppercase tracking-widest">&copy; {new Date().getFullYear()} FarmoLink. Tecnologia a favor da sua saúde.</p>
             </footer>
         </div>
     );

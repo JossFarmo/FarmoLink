@@ -1,13 +1,12 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Card, Badge, Button } from '../components/UI';
 import { Order, OrderStatus } from '../types';
-import { fetchOrders, updateOrderStatus, togglePharmacyAvailability } from '../services/dataService';
+import { fetchOrders, updateOrderStatus, togglePharmacyAvailability, fetchPharmacyById, updatePharmacyDetails } from '../services/dataService';
 import { 
     Clock, DollarSign, Package, Star, RefreshCw, Phone, 
     MessageCircle, X, Truck, ChevronRight, Search, 
     Bike, User as UserIcon, CheckCircle2, XCircle,
-    ArrowRight, ExternalLink, Store, AlertCircle, BellRing
+    ArrowRight, ExternalLink, Store, AlertCircle, BellRing, Loader2, Power
 } from 'lucide-react';
 import { playSound } from '../services/soundService';
 
@@ -42,8 +41,18 @@ export const PharmacyUrgentAlert = ({ alert, onResolve }: { alert: {type: 'ORDER
 
 export const PharmacyOverview = ({ stats, pharmacyId, isAvailable, onRefresh, setView }: any) => {
     const [toggling, setToggling] = useState(false);
+    const [deliveryToggling, setDeliveryToggling] = useState(false);
+    const [pharmacyData, setPharmacyData] = useState<any>(null);
 
-    const handleToggle = async () => {
+    useEffect(() => {
+        const load = async () => {
+            const data = await fetchPharmacyById(pharmacyId);
+            setPharmacyData(data);
+        };
+        load();
+    }, [pharmacyId, isAvailable]);
+
+    const handleToggleVisibility = async () => {
         setToggling(true);
         if(await togglePharmacyAvailability(pharmacyId, !isAvailable)) {
             playSound(isAvailable ? 'click' : 'success');
@@ -52,18 +61,59 @@ export const PharmacyOverview = ({ stats, pharmacyId, isAvailable, onRefresh, se
         setToggling(false);
     };
 
+    const handleToggleDelivery = async () => {
+        if (!pharmacyData) return;
+        setDeliveryToggling(true);
+        const isCurrentlyDelivering = pharmacyData.deliveryFee > 0;
+        const newFee = isCurrentlyDelivering ? 0 : 600;
+        
+        const success = await updatePharmacyDetails(pharmacyId, {
+            ...pharmacyData,
+            deliveryFee: newFee
+        });
+
+        if (success) {
+            playSound(newFee > 0 ? 'success' : 'click');
+            // Recarrega dados locais
+            const updated = await fetchPharmacyById(pharmacyId);
+            setPharmacyData(updated);
+        }
+        setDeliveryToggling(false);
+    };
+
+    const deliveryActive = pharmacyData?.deliveryFee > 0;
+
     return (
         <div className="space-y-6 animate-fade-in">
-            <div className="bg-white p-6 rounded-3xl shadow-sm border flex justify-between items-center">
-                <div>
+            <div className="bg-white p-6 rounded-3xl shadow-sm border flex flex-col md:flex-row justify-between items-center gap-4">
+                <div className="flex-1">
                     <h1 className="text-xl font-black text-gray-800 uppercase tracking-tight">Status da Loja</h1>
                     <p className="text-xs text-gray-400">{isAvailable ? 'Sua farmácia está visível para os clientes.' : 'Sua loja está fechada e oculta no shopping.'}</p>
                 </div>
-                <div className="flex items-center gap-4">
-                    <Badge color={isAvailable ? 'green' : 'red'}>{isAvailable ? 'LOJA ONLINE' : 'LOJA FECHADA'}</Badge>
-                    <button onClick={handleToggle} disabled={toggling} className={`relative inline-flex h-9 w-16 items-center rounded-full transition-colors ${isAvailable ? 'bg-emerald-600 shadow-inner' : 'bg-gray-200'}`}>
-                        <span className={`inline-block h-7 w-7 transform rounded-full bg-white shadow-md transition-transform ml-1 ${isAvailable ? 'translate-x-7' : ''}`} />
-                    </button>
+                <div className="flex flex-wrap items-center gap-4 bg-gray-50 p-3 rounded-2xl border">
+                    {/* TOGGLE VISIBILIDADE */}
+                    <div className="flex items-center gap-3 pr-4 border-r">
+                        <Badge color={isAvailable ? 'green' : 'red'}>{isAvailable ? 'LOJA ONLINE' : 'LOJA FECHADA'}</Badge>
+                        <button onClick={handleToggleVisibility} disabled={toggling} className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${isAvailable ? 'bg-emerald-600 shadow-inner' : 'bg-gray-200'}`}>
+                            <span className={`inline-block h-6 w-6 transform rounded-full bg-white shadow-md transition-transform ml-1 ${isAvailable ? 'translate-x-6' : ''}`} />
+                        </button>
+                    </div>
+
+                    {/* TOGGLE ENTREGA (NOVO/RESTAURO) */}
+                    <div className="flex items-center gap-3">
+                        <Badge color={deliveryActive ? 'blue' : 'gray'}>{deliveryActive ? 'ENTREGA ATIVA' : 'SEM ENTREGA'}</Badge>
+                        <button 
+                            onClick={handleToggleDelivery} 
+                            disabled={deliveryToggling} 
+                            className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${deliveryActive ? 'bg-blue-600 shadow-inner' : 'bg-gray-200'}`}
+                        >
+                            {deliveryToggling ? (
+                                <Loader2 className="animate-spin text-white mx-auto" size={14} />
+                            ) : (
+                                <span className={`inline-block h-6 w-6 transform rounded-full bg-white shadow-md transition-transform ml-1 ${deliveryActive ? 'translate-x-6' : ''}`} />
+                            )}
+                        </button>
+                    </div>
                 </div>
             </div>
 

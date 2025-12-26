@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Bell, Menu, X, LogOut, ShoppingCart, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { User, Notification, UserRole } from '../types';
 import { fetchNotifications, markNotificationRead, deleteNotification } from '../services/dataService';
 import { playSound } from '../services/soundService';
+import { supabase } from '../services/supabaseClient';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -28,20 +28,28 @@ export const MainLayout: React.FC<LayoutProps> = ({
   const prevUnreadCountRef = useRef(0);
 
   useEffect(() => {
+      if (!user?.id) return;
+
       loadNotifications();
-      const interval = setInterval(loadNotifications, 12000); // Polling de notificações
-      return () => clearInterval(interval);
+
+      // --- NOTIFICAÇÕES EM TEMPO REAL ---
+      const channel = supabase
+          .channel(`user-notifs-${user.id}`)
+          .on('postgres_changes', 
+              { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, 
+              () => {
+                  loadNotifications();
+                  playSound('notification');
+              }
+          )
+          .subscribe();
+      
+      return () => { supabase.removeChannel(channel); };
   }, [user?.id]);
 
   const loadNotifications = async () => {
       const data = await fetchNotifications();
       const currentUnread = data.filter(n => !n.read).length;
-      
-      // DISPARO SONORO DO SININHO: Se o número de não lidas aumentou, toca o som!
-      if (currentUnread > prevUnreadCountRef.current) {
-          playSound('notification');
-      }
-      
       prevUnreadCountRef.current = currentUnread;
       setNotifications(data);
   }
@@ -91,9 +99,9 @@ export const MainLayout: React.FC<LayoutProps> = ({
                         <div className="bg-white p-1.5 rounded-xl text-emerald-800 shadow-sm shrink-0">
                             <img src={LOGO_URL} alt="Logo" className="w-10 h-10 object-contain" />
                         </div>
-                        <div className="animate-fade-in">
-                            <h1 className="font-bold text-lg tracking-tight leading-none text-white">FarmoLink</h1>
-                            <p className="text-[9px] text-emerald-400 uppercase tracking-widest leading-none mt-1 font-bold">
+                        <div className="animate-fade-in overflow-hidden">
+                            <h1 className="font-bold text-lg tracking-tight leading-none text-white truncate">FarmoLink</h1>
+                            <p className="text-[9px] text-emerald-400 uppercase tracking-widest leading-none mt-1 font-bold truncate">
                                 {user.role === 'CUSTOMER' ? 'Shopping' : (user.role === 'ADMIN' ? 'Administrador' : 'Farmácia')}
                             </p>
                         </div>
@@ -132,7 +140,7 @@ export const MainLayout: React.FC<LayoutProps> = ({
                         <item.icon size={22} className={`${activePage === item.id ? 'text-white' : 'text-emerald-300 group-hover:text-white'} shrink-0`} />
                         
                         {!isCollapsed && (
-                            <span className="font-bold ml-3 text-sm whitespace-nowrap overflow-hidden text-ellipsis animate-fade-in">
+                            <span className="font-bold ml-3 text-sm whitespace-nowrap overflow-hidden text-ellipsis animate-fade-in flex-1 text-left pr-4">
                                 {item.label}
                             </span>
                         )}
@@ -166,7 +174,7 @@ export const MainLayout: React.FC<LayoutProps> = ({
                     className={`w-full flex items-center ${isCollapsed ? 'justify-center' : 'justify-start px-4'} gap-3 bg-emerald-900/50 hover:bg-red-600/90 text-emerald-200 hover:text-white py-3 rounded-xl transition-all duration-300 group shadow-sm border border-emerald-800/50`}
                 >
                     <LogOut size={18} className="shrink-0 group-hover:scale-110 transition-transform" />
-                    {!isCollapsed && <span className="text-sm font-bold">Encerrar Sessão</span>}
+                    {!isCollapsed && <span className="text-sm font-bold whitespace-nowrap">Encerrar Sessão</span>}
                 </button>
             </div>
         </aside>
@@ -176,16 +184,16 @@ export const MainLayout: React.FC<LayoutProps> = ({
             
             {/* HEADER */}
             <header className="bg-white border-b border-gray-200 h-16 flex items-center justify-between px-4 md:px-8 shadow-sm z-50 sticky top-0 shrink-0">
-                <div className="flex items-center gap-3">
-                    <button onClick={() => setIsMobileMenuOpen(true)} className="md:hidden text-gray-500 hover:text-emerald-600 p-2 transition-colors">
+                <div className="flex items-center gap-3 overflow-hidden">
+                    <button onClick={() => setIsMobileMenuOpen(true)} className="md:hidden text-gray-500 hover:text-emerald-600 p-2 transition-colors shrink-0">
                         <Menu size={24} />
                     </button>
-                    <h2 className="font-bold text-gray-800 text-lg md:text-xl truncate max-w-[150px] sm:max-w-none">
+                    <h2 className="font-bold text-gray-800 text-lg md:text-xl truncate">
                         {menuItems.find(m => m.id === activePage)?.label || 'FarmoLink'}
                     </h2>
                 </div>
 
-                <div className="flex items-center gap-1 md:gap-4">
+                <div className="flex items-center gap-1 md:gap-4 shrink-0">
                     {user.role === UserRole.CUSTOMER && (
                         <button onClick={() => onNavigate('cart')} className="relative p-2 text-gray-500 hover:text-emerald-600 transition-colors rounded-xl hover:bg-gray-100">
                             <ShoppingCart size={22} />
@@ -204,7 +212,7 @@ export const MainLayout: React.FC<LayoutProps> = ({
                         </button>
 
                         {showNotif && (
-                            <div className="absolute top-full right-0 mt-2 w-[280px] sm:w-80 bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden z-[100] animate-fade-in origin-top-right">
+                            <div className="absolute top-full right-0 mt-2 w-[calc(100vw-2rem)] sm:w-80 max-w-sm bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden z-[100] animate-fade-in origin-top-right">
                                 <div className="p-4 bg-gray-50 border-b flex justify-between items-center">
                                     <h4 className="font-bold text-sm text-gray-700">Notificações</h4>
                                     <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">{notifications.length}</span>
@@ -251,16 +259,16 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, setPage, onLoginCli
     return (
         <header className="fixed w-full top-0 z-[100] bg-white/95 backdrop-blur-md border-b border-gray-100 shadow-sm transition-all duration-300">
             <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-                <div className="flex items-center gap-3 cursor-pointer" onClick={() => setPage('home')}>
-                     <img src={LOGO_URL} alt="Logo" className="w-10 h-10 sm:w-12 sm:h-12 object-contain bg-white rounded-xl p-1 shadow-sm border border-gray-100" />
-                    <span className="font-bold text-xl sm:text-2xl tracking-tight text-gray-800">FarmoLink</span>
+                <div className="flex items-center gap-3 cursor-pointer overflow-hidden" onClick={() => setPage('home')}>
+                     <img src={LOGO_URL} alt="Logo" className="w-10 h-10 sm:w-12 sm:h-12 object-contain bg-white rounded-xl p-1 shadow-sm border border-gray-100 shrink-0" />
+                    <span className="font-bold text-xl sm:text-2xl tracking-tight text-gray-800 truncate">FarmoLink</span>
                 </div>
                 
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-4 shrink-0">
                      {onLoginClick && (
                         <button 
                             onClick={onLoginClick}
-                            className="px-6 py-2.5 bg-emerald-600 text-white rounded-full font-bold text-sm hover:bg-emerald-700 transition-all shadow-lg hover:shadow-emerald-500/30 active:scale-95"
+                            className="px-6 py-2.5 bg-emerald-600 text-white rounded-full font-bold text-sm hover:bg-emerald-700 transition-all shadow-lg hover:shadow-emerald-500/30 active:scale-95 whitespace-nowrap"
                         >
                             Entrar
                         </button>

@@ -33,7 +33,6 @@ export interface Pharmacy {
   distance?: string;
 }
 
-// Added PharmacyInput for settings and management
 export interface PharmacyInput {
   name: string;
   nif: string;
@@ -44,7 +43,6 @@ export interface PharmacyInput {
   phone: string;
 }
 
-// Added PharmacyFinancials for accounting views
 export interface PharmacyFinancials {
   id: string;
   name: string;
@@ -54,7 +52,17 @@ export interface PharmacyFinancials {
     platformFees: number;
     netEarnings: number;
     pendingClearance: number;
+    paidFees: number;
+    unpaidFees: number;
   }
+}
+
+export interface MonthlyStatement {
+    month: string;
+    year: number;
+    totalSales: number;
+    commissionDue: number;
+    status: 'OPEN' | 'PENDING_APPROVAL' | 'SETTLED';
 }
 
 export interface GlobalProduct {
@@ -64,7 +72,7 @@ export interface GlobalProduct {
     category: string;
     image: string;
     common: boolean; 
-    referencePrice?: number; // Preço base para governança
+    referencePrice?: number;
 }
 
 export interface Product {
@@ -127,6 +135,8 @@ export enum OrderStatus {
   REJECTED = 'Cancelado pela Farmácia'
 }
 
+export type CommissionStatus = 'PENDING' | 'WAITING_APPROVAL' | 'PAID';
+
 export interface Order {
   id: string;
   customerName: string;
@@ -139,6 +149,7 @@ export interface Order {
   pharmacyId: string;
   address?: string;
   commissionAmount?: number;
+  commissionStatus?: CommissionStatus;
 }
 
 export interface QuotedItem {
@@ -180,7 +191,6 @@ export interface DashboardStats {
   productsCount: number;
 }
 
-// Added Notification for system alerts
 export interface Notification {
   id: string;
   userId: string;
@@ -192,7 +202,6 @@ export interface Notification {
   link?: string;
 }
 
-// Added CarouselSlide for landing page management
 export interface CarouselSlide {
   id: string;
   title: string;
@@ -202,7 +211,6 @@ export interface CarouselSlide {
   order: number;
 }
 
-// Added Partner for brand logos display
 export interface Partner {
   id: string;
   name: string;

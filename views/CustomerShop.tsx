@@ -1,6 +1,6 @@
 
-import React, { useState, useMemo } from 'react';
-import { Search, MapPin, Plus, Store, Upload, Star, ArrowLeft, Pill, ChevronRight, Bike, Clock } from 'lucide-react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { Search, MapPin, Plus, Store, Upload, Star, ArrowLeft, Pill, ChevronRight, Bike, Clock, ShoppingCart, X, Loader2 } from 'lucide-react';
 import { Product, Pharmacy, PRODUCT_CATEGORIES, CartItem } from '../types';
 import { Button, Badge, Card } from '../components/UI';
 import { playSound } from '../services/soundService';
@@ -11,6 +11,18 @@ const normalizeText = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]
 export const HomeView = ({ products, pharmacies, onAddToCart, onNavigate, onViewPharmacy }: any) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeCategory, setActiveCategory] = useState('Todos');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const filteredProducts = useMemo(() => {
     return products.filter((p: Product) => {
@@ -20,6 +32,13 @@ export const HomeView = ({ products, pharmacies, onAddToCart, onNavigate, onView
     });
   }, [products, searchTerm, activeCategory]);
 
+  const suggestions = useMemo(() => {
+    if (!searchTerm || searchTerm.length < 2) return [];
+    return products
+      .filter((p: Product) => normalizeText(p.name).includes(normalizeText(searchTerm)))
+      .slice(0, 6);
+  }, [products, searchTerm]);
+
   return (
     <div className="space-y-8 pb-32 animate-fade-in"> 
       <div className="bg-emerald-600 rounded-[40px] p-10 text-white shadow-xl relative overflow-hidden">
@@ -28,7 +47,7 @@ export const HomeView = ({ products, pharmacies, onAddToCart, onNavigate, onView
               <p className="text-emerald-100 opacity-80 mb-8">Compare preços e receba em casa com segurança.</p>
               <div className="flex gap-4">
                   <button onClick={() => onNavigate('upload-rx')} className="bg-white text-emerald-800 px-6 py-4 rounded-3xl font-black flex items-center gap-3 shadow-lg hover:scale-105 transition-transform"><Upload size={20}/> Enviar Receita</button>
-                  <button onClick={() => onNavigate('pharmacies-list')} className="bg-emerald-500 text-white px-6 py-4 rounded-3xl font-black flex items-center gap-3 hover:bg-emerald-400 transition-colors"><Store size={20}/> Ver Farmácias</button>
+                  <button onClick={() => onNavigate('pharmacies-list')} className="bg-emerald-50 text-white px-6 py-4 rounded-3xl font-black flex items-center gap-3 hover:bg-emerald-400 transition-colors"><Store size={20}/> Ver Farmácias</button>
               </div>
           </div>
           <Pill className="absolute -bottom-10 -right-10 text-white opacity-10 w-64 h-64 rotate-45" />
@@ -41,10 +60,58 @@ export const HomeView = ({ products, pharmacies, onAddToCart, onNavigate, onView
       </div>
 
       <div className="space-y-4">
-          <div className="bg-white p-2 rounded-2xl border shadow-sm flex items-center gap-3">
-              <Search className="text-gray-300 ml-4" size={20}/>
-              <input placeholder="Procurar medicamento..." className="w-full py-4 outline-none font-bold text-gray-700" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/>
+          <div ref={searchRef} className="relative z-[60]">
+            <div className="bg-white p-2 rounded-2xl border shadow-sm flex items-center gap-3">
+                <Search className="text-gray-300 ml-4" size={20}/>
+                <input 
+                    placeholder="Procurar medicamento..." 
+                    className="w-full py-4 outline-none font-bold text-gray-700" 
+                    value={searchTerm} 
+                    onFocus={() => setShowSuggestions(true)}
+                    onChange={e => { setSearchTerm(e.target.value); setShowSuggestions(true); }}
+                />
+                {searchTerm && (
+                    <button onClick={() => setSearchTerm('')} className="p-2 text-gray-300 hover:text-gray-500 mr-2">
+                        <X size={20}/>
+                    </button>
+                )}
+            </div>
+
+            {showSuggestions && suggestions.length > 0 && (
+                <div className="absolute top-full left-0 w-full bg-white mt-2 rounded-[32px] shadow-2xl border border-gray-100 overflow-hidden animate-scale-in origin-top">
+                    <div className="p-4 bg-gray-50 border-b flex justify-between items-center">
+                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Sugestões de Medicamentos</span>
+                        <Badge color="green">{suggestions.length} encontrados</Badge>
+                    </div>
+                    <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
+                        {suggestions.map((s: Product) => (
+                            <div 
+                                key={s.id} 
+                                onClick={() => { onAddToCart(s); setShowSuggestions(false); }}
+                                className="p-4 hover:bg-emerald-50 cursor-pointer flex items-center justify-between group transition-colors border-b last:border-0"
+                            >
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-gray-50 rounded-xl flex items-center justify-center p-2 border group-hover:border-emerald-200">
+                                        <img src={s.image} className="max-h-full object-contain" />
+                                    </div>
+                                    <div>
+                                        <p className="font-bold text-gray-800 text-sm">{formatProductNameForCustomer(s.name)}</p>
+                                        <p className="text-[10px] text-gray-400 font-bold uppercase">{s.category}</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <span className="font-black text-emerald-600 text-sm">Kz {s.price.toLocaleString()}</span>
+                                    <div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg group-hover:bg-emerald-600 group-hover:text-white transition-all">
+                                        <Plus size={16}/>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
           </div>
+
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
               {filteredProducts.slice(0, 15).map((p: Product) => (
                   <div 
@@ -118,13 +185,40 @@ export const AllPharmaciesView = ({ pharmacies, onViewPharmacy }: any) => {
 };
 
 export const PharmacyDetailsView = ({ pharmacy, products, onAddToCart, onBack }: any) => {
+    const [q, setQ] = useState('');
+    const [showSuggestions, setShowSuggestions] = useState(false);
+    const searchRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+          if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+            setShowSuggestions(false);
+          }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    const filtered = useMemo(() => {
+        return products.filter((p: any) => normalizeText(p.name).includes(normalizeText(q)));
+    }, [products, q]);
+
+    const suggestions = useMemo(() => {
+        if (!q || q.length < 2) return [];
+        return products
+          .filter((p: any) => normalizeText(p.name).includes(normalizeText(q)))
+          .slice(0, 5);
+    }, [products, q]);
+
     if(!pharmacy) return null;
+
     return (
         <div className="space-y-8 pb-20 animate-fade-in">
             <button onClick={onBack} className="text-gray-400 font-black text-xs uppercase flex items-center gap-2 hover:text-emerald-600"><ArrowLeft size={16}/> Voltar</button>
+            
             <div className="bg-white p-10 rounded-[40px] border shadow-sm flex flex-col md:flex-row gap-10 items-center">
                 <div className="w-32 h-32 bg-emerald-50 text-emerald-700 rounded-[40px] flex items-center justify-center text-5xl font-black border-4 border-white shadow-xl">{pharmacy.name.charAt(0)}</div>
-                <div className="text-center md:text-left space-y-2">
+                <div className="text-center md:text-left flex-1 space-y-2">
                     <h1 className="text-4xl font-black text-gray-800">{pharmacy.name}</h1>
                     <div className="flex flex-wrap justify-center md:justify-start gap-4 text-xs font-bold text-gray-400 uppercase">
                         <span className="flex items-center gap-1"><MapPin size={14} className="text-emerald-500"/> {pharmacy.address}</span>
@@ -132,26 +226,67 @@ export const PharmacyDetailsView = ({ pharmacy, products, onAddToCart, onBack }:
                         <span className="flex items-center gap-1 text-yellow-500"><Star fill="currentColor" size={14}/> {pharmacy.rating}</span>
                     </div>
                 </div>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                {products.map((p: any) => (
-                    <div 
-                        key={p.id} 
-                        onClick={() => onAddToCart(p)}
-                        className="bg-white p-4 rounded-3xl border shadow-sm flex flex-col cursor-pointer hover:shadow-xl transition-all active:scale-95 group"
-                    >
-                        <div className="aspect-square bg-gray-50 rounded-2xl mb-4 flex items-center justify-center p-4">
-                            <img src={p.image} className="max-h-full object-contain group-hover:scale-110 transition-transform" alt={p.name} />
+
+                {/* BUSCA INTERNA COM SUGESTÕES */}
+                <div ref={searchRef} className="w-full md:w-80 relative">
+                    <div className="bg-gray-50 p-1 rounded-2xl border flex items-center gap-2">
+                        <Search className="text-gray-300 ml-3" size={18}/>
+                        <input 
+                            placeholder="Buscar no estoque..." 
+                            className="bg-transparent w-full py-3 outline-none font-bold text-sm text-gray-700" 
+                            value={q} 
+                            onFocus={() => setShowSuggestions(true)}
+                            onChange={e => { setQ(e.target.value); setShowSuggestions(true); }}
+                        />
+                    </div>
+                    {showSuggestions && suggestions.length > 0 && (
+                        <div className="absolute top-full left-0 w-full bg-white mt-2 rounded-2xl shadow-2xl border border-gray-100 overflow-hidden z-[70] animate-scale-in origin-top">
+                            {suggestions.map((s: any) => (
+                                <div 
+                                    key={s.id} 
+                                    onClick={() => { onAddToCart(s); setShowSuggestions(false); setQ(''); }}
+                                    className="p-3 hover:bg-emerald-50 cursor-pointer flex items-center gap-3 transition-colors border-b last:border-0"
+                                >
+                                    <div className="w-8 h-8 bg-gray-50 rounded-lg flex items-center justify-center p-1 border">
+                                        <img src={s.image} className="max-h-full object-contain" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="font-bold text-gray-800 text-[11px] truncate">{formatProductNameForCustomer(s.name)}</p>
+                                        <p className="text-[9px] text-emerald-600 font-black">Kz {s.price.toLocaleString()}</p>
+                                    </div>
+                                    <Plus size={14} className="text-emerald-400" />
+                                </div>
+                            ))}
                         </div>
-                        <h4 className="font-bold text-gray-800 text-sm flex-1">{formatProductNameForCustomer(p.name)}</h4>
-                        <div className="flex justify-between items-center pt-3 border-t mt-3">
-                            <span className="font-black text-emerald-600">Kz {p.price.toLocaleString()}</span>
-                            <div className="bg-emerald-50 text-emerald-600 p-2 rounded-xl group-hover:bg-emerald-600 group-hover:text-white transition-all">
-                                <Plus size={18}/>
+                    )}
+                </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                {filtered.length === 0 ? (
+                    <div className="col-span-full py-20 text-center text-gray-400 font-bold uppercase tracking-widest text-sm">
+                        Nenhum medicamento encontrado para "{q}"
+                    </div>
+                ) : (
+                    filtered.map((p: any) => (
+                        <div 
+                            key={p.id} 
+                            onClick={() => onAddToCart(p)}
+                            className="bg-white p-4 rounded-3xl border shadow-sm flex flex-col cursor-pointer hover:shadow-xl transition-all active:scale-95 group"
+                        >
+                            <div className="aspect-square bg-gray-50 rounded-2xl mb-4 flex items-center justify-center p-4">
+                                <img src={p.image} className="max-h-full object-contain group-hover:scale-110 transition-transform" alt={p.name} />
+                            </div>
+                            <h4 className="font-bold text-gray-800 text-sm flex-1">{formatProductNameForCustomer(p.name)}</h4>
+                            <div className="flex justify-between items-center pt-3 border-t mt-3">
+                                <span className="font-black text-emerald-600">Kz {p.price.toLocaleString()}</span>
+                                <div className="bg-emerald-50 text-emerald-600 p-2 rounded-xl group-hover:bg-emerald-600 group-hover:text-white transition-all">
+                                    <Plus size={18}/>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                ))}
+                    ))
+                )}
             </div>
         </div>
     );
@@ -159,14 +294,26 @@ export const PharmacyDetailsView = ({ pharmacy, products, onAddToCart, onBack }:
 
 export const CartView = ({ items, pharmacies, updateQuantity, onCheckout, userAddress, onBack }: any) => {
     const [type, setType] = useState<'DELIVERY' | 'PICKUP'>('DELIVERY');
+    const [isProcessing, setIsProcessing] = useState(false);
     const sub = items.reduce((a: any, b: any) => a + (b.price * b.quantity), 0);
     const pharm = items.length > 0 ? pharmacies.find((p:any) => p.id === items[0].pharmacyId) : null;
     const fee = type === 'DELIVERY' ? (pharm?.deliveryFee || 0) : 0;
     const total = sub + fee;
 
+    const handleConfirmCheckout = async () => {
+        if (isProcessing) return; // BLOQUEIO FÍSICO CONTRA DUPLICAÇÃO
+        setIsProcessing(true);
+        try {
+            await onCheckout(type, userAddress, total);
+        } catch (err) {
+            console.error(err);
+            setIsProcessing(false); // Só reseta se der erro, permitindo tentar de novo
+        }
+    };
+
     return (
         <div className="max-w-4xl mx-auto py-10 animate-fade-in pb-32">
-            <button onClick={onBack} className="text-gray-400 font-black text-xs uppercase mb-6 flex items-center gap-2 hover:text-emerald-600"><ArrowLeft size={16}/> Continuar Compras</button>
+            <button onClick={onBack} className="text-gray-400 font-black text-xs uppercase mb-6 flex items-center gap-2 hover:text-emerald-600" disabled={isProcessing}><ArrowLeft size={16}/> Continuar Compras</button>
             <h2 className="text-3xl font-black text-gray-800 mb-8">Seu Carrinho</h2>
             {items.length === 0 ? (
                 <div className="bg-white p-20 rounded-[40px] border border-dashed text-center flex flex-col items-center">
@@ -192,9 +339,9 @@ export const CartView = ({ items, pharmacies, updateQuantity, onCheckout, userAd
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-3 bg-gray-50 p-2 rounded-2xl border">
-                                    <button onClick={() => updateQuantity(it.id, -1)} className="w-8 h-8 bg-white rounded-xl shadow-sm font-black text-gray-600 hover:bg-red-50 hover:text-red-500 transition-all">-</button>
+                                    <button disabled={isProcessing} onClick={() => updateQuantity(it.id, -1)} className="w-8 h-8 bg-white rounded-xl shadow-sm font-black text-gray-600 hover:bg-red-50 hover:text-red-500 transition-all">-</button>
                                     <span className="font-black text-gray-800 min-w-[20px] text-center">{it.quantity}</span>
-                                    <button onClick={() => updateQuantity(it.id, 1)} className="w-8 h-8 bg-white rounded-xl shadow-sm font-black text-gray-600 hover:bg-emerald-50 hover:text-emerald-500 transition-all">+</button>
+                                    <button disabled={isProcessing} onClick={() => updateQuantity(it.id, 1)} className="w-8 h-8 bg-white rounded-xl shadow-sm font-black text-gray-600 hover:bg-emerald-50 hover:text-emerald-500 transition-all">+</button>
                                 </div>
                             </div>
                         ))}
@@ -202,15 +349,21 @@ export const CartView = ({ items, pharmacies, updateQuantity, onCheckout, userAd
                     <div className="bg-emerald-900 text-white p-8 rounded-[40px] shadow-2xl space-y-6 h-fit sticky top-24">
                         <h3 className="font-black text-xl border-b border-white/10 pb-4 uppercase tracking-tighter">Finalizar</h3>
                         <div className="flex gap-2">
-                            <button onClick={() => setType('DELIVERY')} className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase border transition-all ${type === 'DELIVERY' ? 'bg-white text-emerald-900 border-white shadow-lg' : 'bg-transparent text-white border-white/20'}`}>Entrega</button>
-                            <button onClick={() => setType('PICKUP')} className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase border transition-all ${type === 'PICKUP' ? 'bg-white text-emerald-900 border-white shadow-lg' : 'bg-transparent text-white border-white/20'}`}>Retirada</button>
+                            <button disabled={isProcessing} onClick={() => setType('DELIVERY')} className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase border transition-all ${type === 'DELIVERY' ? 'bg-white text-emerald-900 border-white shadow-lg' : 'bg-transparent text-white border-white/20'}`}>Entrega</button>
+                            <button disabled={isProcessing} onClick={() => setType('PICKUP')} className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase border transition-all ${type === 'PICKUP' ? 'bg-white text-emerald-900 border-white shadow-lg' : 'bg-transparent text-white border-white/20'}`}>Retirada</button>
                         </div>
                         <div className="space-y-3 pt-4 border-t border-white/10">
                             <div className="flex justify-between text-emerald-200 font-bold text-xs uppercase tracking-widest"><span>Subtotal</span><span>Kz {sub.toLocaleString()}</span></div>
                             <div className="flex justify-between text-emerald-200 font-bold text-xs uppercase tracking-widest"><span>Taxa {type === 'DELIVERY' ? 'Entrega' : ''}</span><span>Kz {fee.toLocaleString()}</span></div>
                             <div className="flex justify-between items-center pt-4 text-3xl font-black"><span>Total</span><span>Kz {total.toLocaleString()}</span></div>
                         </div>
-                        <Button onClick={() => onCheckout(type, userAddress, total)} className="w-full py-5 bg-emerald-500 hover:bg-emerald-400 font-black text-lg rounded-3xl shadow-xl shadow-emerald-950">Confirmar Compra</Button>
+                        <Button 
+                            onClick={handleConfirmCheckout} 
+                            disabled={isProcessing} 
+                            className="w-full py-5 bg-emerald-500 hover:bg-emerald-400 font-black text-lg rounded-3xl shadow-xl shadow-emerald-950 flex items-center justify-center gap-2"
+                        >
+                            {isProcessing ? <Loader2 className="animate-spin" size={24} /> : "Confirmar Compra"}
+                        </Button>
                         <p className="text-[9px] text-center text-emerald-300 opacity-60 font-medium">Pagamento via TPA ou Dinheiro na entrega.</p>
                     </div>
                 </div>

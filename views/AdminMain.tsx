@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, Badge, Button } from '../components/UI';
 import { Pharmacy, Order } from '../types';
 import { getAdminStats, fetchPharmacies, fetchOrders } from '../services/dataService';
-import { Users, Store, ShoppingBag, Activity, TrendingUp, History, Settings, ShieldCheck, Database, Search, RefreshCw, Eye, Zap } from 'lucide-react';
+import { Users, Store, ShoppingBag, Activity, TrendingUp, History, Settings, ShieldCheck, Database, Search, RefreshCw, Eye, Clock, Calendar } from 'lucide-react';
 
 export const AdminOverview = ({ setView }: any) => {
     const [stats, setStats] = useState({ users: 0, pharmacies: 0, ordersToday: 0, totalRevenue: 0 });
@@ -113,7 +112,7 @@ export const AdminGlobalOrders = () => {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
                 <div>
                     <h2 className="text-2xl font-black text-gray-800">Monitoramento da Rede</h2>
-                    <p className="text-sm text-gray-500">Fluxo transacional completo.</p>
+                    <p className="text-sm text-gray-500">Fluxo transacional completo e auditoria.</p>
                 </div>
                 <div className="flex items-center gap-3 w-full md:w-auto">
                     <div className="bg-gray-50 border rounded-xl px-3 py-2 flex items-center gap-2 flex-1 md:w-64">
@@ -123,27 +122,82 @@ export const AdminGlobalOrders = () => {
                     <button onClick={loadData} className="p-2 bg-emerald-50 text-emerald-600 rounded-xl hover:bg-emerald-600 transition-all"><RefreshCw size={20} className={loading ? 'animate-spin' : ''}/></button>
                 </div>
             </div>
+            
             <Card className="p-0 overflow-hidden shadow-sm">
-                <table className="w-full text-left text-sm">
-                    <thead className="bg-gray-50 border-b text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                        <tr><th className="p-5">Pedido</th><th className="p-5">Origem</th><th className="p-5">Cliente</th><th className="p-5">Valor</th><th className="p-5 text-center">Status</th><th className="p-5 text-right">Ação</th></tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100 bg-white">
-                        {filtered.map(o => {
-                            const pharm = pharmacies.find(p => p.id === o.pharmacyId);
-                            return (
-                                <tr key={o.id} className="hover:bg-gray-50 transition-colors">
-                                    <td className="p-5"><p className="font-mono text-xs font-bold text-gray-800">#{o.id.slice(0,8)}</p></td>
-                                    <td className="p-5"><span className="font-bold text-gray-700">{pharm?.name || '---'}</span></td>
-                                    <td className="p-5"><p className="font-bold text-gray-800">{o.customerName}</p></td>
-                                    <td className="p-5"><span className="font-black text-emerald-600">Kz {o.total.toLocaleString()}</span></td>
-                                    <td className="p-5 text-center"><Badge color={o.status === 'Concluído' ? 'green' : (o.status.includes('Cancelado') ? 'red' : 'blue')}>{o.status}</Badge></td>
-                                    <td className="p-5 text-right"><button className="p-2 text-gray-400 hover:text-emerald-600"><Eye size={18}/></button></td>
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                </table>
+                <div className="overflow-x-auto custom-scrollbar">
+                    <table className="w-full text-left text-sm min-w-[800px]">
+                        <thead className="bg-gray-50 border-b text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                            <tr>
+                                <th className="p-5">Pedido / Hora</th>
+                                <th className="p-5">Origem</th>
+                                <th className="p-5">Cliente</th>
+                                <th className="p-5">Valor</th>
+                                <th className="p-5 text-center">Status</th>
+                                <th className="p-5 text-right">Ação</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100 bg-white">
+                            {filtered.map((o, idx) => {
+                                const pharm = pharmacies.find(p => p.id === o.pharmacyId);
+                                
+                                // Lógica de separação por dias
+                                const oDate = new Date(o.date);
+                                const currentDateStr = o.date.split(',')[0]; 
+                                
+                                const prevOrder = filtered[idx - 1];
+                                const prevDateStr = prevOrder ? prevOrder.date.split(',')[0] : null;
+                                const isNewDay = currentDateStr !== prevDateStr;
+
+                                return (
+                                    <React.Fragment key={o.id}>
+                                        {isNewDay && (
+                                            <tr className="bg-gray-50/80">
+                                                <td colSpan={6} className="p-4 text-center border-y border-gray-100">
+                                                    <div className="flex items-center justify-center gap-4">
+                                                        <div className="h-[1px] bg-gray-200 flex-1"></div>
+                                                        <span className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.3em] flex items-center gap-2 whitespace-nowrap">
+                                                            <Calendar size={12}/> {currentDateStr}
+                                                        </span>
+                                                        <div className="h-[1px] bg-gray-200 flex-1"></div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                        <tr className="hover:bg-gray-50 transition-colors">
+                                            <td className="p-5">
+                                                <p className="font-mono text-[10px] font-black text-gray-400 uppercase tracking-tighter">#{o.id.slice(0,8)}</p>
+                                                <p className="text-xs font-bold text-gray-800 mt-1 flex items-center gap-1">
+                                                    <Clock size={12} className="text-emerald-500"/> {o.date.split(',')[1]?.trim() || '---'}
+                                                </p>
+                                            </td>
+                                            <td className="p-5">
+                                                <span className="font-bold text-gray-700 block truncate max-w-[150px]">{pharm?.name || '---'}</span>
+                                                <p className="text-[9px] text-gray-400 font-bold uppercase">{pharm?.address || ''}</p>
+                                            </td>
+                                            <td className="p-5">
+                                                <p className="font-bold text-gray-800">{o.customerName}</p>
+                                                <p className="text-[10px] text-gray-400">{o.customerPhone || ''}</p>
+                                            </td>
+                                            <td className="p-5">
+                                                <span className="font-black text-emerald-600">Kz {o.total.toLocaleString()}</span>
+                                            </td>
+                                            <td className="p-5 text-center">
+                                                <Badge color={o.status === 'Concluído' ? 'green' : (o.status.includes('Cancelado') ? 'red' : 'blue')}>
+                                                    {o.status}
+                                                </Badge>
+                                            </td>
+                                            <td className="p-5 text-right">
+                                                <button className="p-2 text-gray-300 hover:text-emerald-600 transition-colors">
+                                                    <Eye size={18}/>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    </React.Fragment>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
             </Card>
         </div>
     );
