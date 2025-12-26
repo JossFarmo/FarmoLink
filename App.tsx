@@ -71,7 +71,6 @@ const App: React.FC = () => {
   const [page, setPage] = useState('home'); 
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error' | 'info'} | null>(null);
 
-  // Estados Globais de UI
   const [products, setProducts] = useState<Product[]>([]);
   const [pharmacies, setPharmacies] = useState<Pharmacy[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -88,7 +87,6 @@ const App: React.FC = () => {
   const lastRxCountRef = useRef(0);
   const isInitialLoadDone = useRef(false);
 
-  // Carregamento de dados
   const loadData = useCallback(async (u: User, forceStatic = false) => {
       if (!u) return;
       try {
@@ -99,7 +97,7 @@ const App: React.FC = () => {
               ]);
               setPharmacies(phData || []);
               setProducts(prDataFetched || []);
-              setCacheForUser(u.id, { pharmacies: phData, products: prDataFetched });
+              setCacheForUser(u.id, { pharmacies: phData || [], products: prDataFetched || [] });
               isInitialLoadDone.current = true;
           }
 
@@ -123,12 +121,12 @@ const App: React.FC = () => {
                       lastPendingCountRef.current = currentPending;
                       lastRxCountRef.current = currentRx;
 
-                      setOrders(myOrders); 
-                      setPrescriptions(myRx);
+                      setOrders(myOrders || []); 
+                      setPrescriptions(myRx || []);
                       setPharmacyStats({
                           pendingOrders: currentPending,
                           totalOrders: (myOrders || []).filter(o => o.status === OrderStatus.COMPLETED).length,
-                          revenue: (myOrders || []).filter(o => o.status === OrderStatus.COMPLETED).reduce((acc, o) => acc + o.total, 0),
+                          revenue: (myOrders || []).filter(o => o.status === OrderStatus.COMPLETED).reduce((acc, o) => acc + (Number(o.total) || 0), 0),
                           productsCount: products.length
                       });
                   }
@@ -137,37 +135,52 @@ const App: React.FC = () => {
               const [allOrders, myRx] = await Promise.all([fetchOrders(), fetchPrescriptionRequests(UserRole.CUSTOMER, u.id)]);
               const myOrders = (allOrders || []).filter(o => o.customerName === u.name);
               setOrders(myOrders);
-              setPrescriptions(myRx);
+              setPrescriptions(myRx || []);
           } else if (u.role === UserRole.ADMIN) {
               const allOrders = await fetchOrders();
-              setOrders(allOrders);
+              setOrders(allOrders || []);
           }
-      } catch (err) { console.warn("Sync falhou, usando cache."); }
+      } catch (err) { 
+          console.warn("Sync falhou, usando cache ou resetando estado."); 
+      }
   }, [products.length]);
 
-  // MONITOR DE AUTENTICAÇÃO
+  // MONITOR DE AUTENTICAÇÃO COM FAIL-SAFE
   useEffect(() => {
+    let authTimeout = setTimeout(() => {
+        if (authChecking) {
+            console.warn("🕒 Timeout de segurança atingido na sincronização.");
+            setAuthChecking(false);
+        }
+    }, 8000); // 8 segundos de segurança para não travar a tela
+
     const initAuth = async () => {
         try {
-            const u = await getCurrentUser();
-            if (u) {
-                const cached = getCacheForUser(u.id);
-                if (cached) {
-                    setProducts(cached.products);
-                    setPharmacies(cached.pharmacies);
-                    setOrders(cached.orders);
-                    setPrescriptions(cached.prescriptions);
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user) {
+                const u = await getCurrentUser();
+                if (u) {
+                    const cached = getCacheForUser(u.id);
+                    if (cached) {
+                        setProducts(cached.products || []);
+                        setPharmacies(cached.pharmacies || []);
+                        setOrders(cached.orders || []);
+                        setPrescriptions(cached.prescriptions || []);
+                    }
+                    handleLogin(u);
                 }
-                handleLogin(u);
             }
         } catch (e) {
-            window.localStorage.removeItem('supabase.auth.token');
+            console.error("Erro na carga inicial:", e);
+            localStorage.removeItem('farmolink-auth-token');
         } finally {
+            clearTimeout(authTimeout);
             setAuthChecking(false);
         }
     };
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log("Auth Event:", event);
       if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
           const u = await getCurrentUser();
           if (u) handleLogin(u);
@@ -179,10 +192,12 @@ const App: React.FC = () => {
     });
 
     initAuth();
-    return () => { subscription.unsubscribe(); };
+    return () => { 
+        subscription.unsubscribe();
+        clearTimeout(authTimeout);
+    };
   }, []);
 
-  // REALTIME
   useEffect(() => {
       if (!user) return;
       const channel = supabase
@@ -195,7 +210,7 @@ const App: React.FC = () => {
 
   const handleCleanup = () => {
       setUser(null);
-      setPage('home'); // Volta para a Landing Page
+      setPage('home');
       setProducts([]);
       setPharmacies([]);
       setOrders([]);
@@ -212,14 +227,9 @@ const App: React.FC = () => {
     loadData(u);
   };
 
-  /**
-   * LOGOUT CORRIGIDO PARA EVITAR 404
-   * Não usamos window.location.reload() para evitar erro de rota no servidor.
-   * Resetamos o estado manualmente e o onAuthStateChange cuida do resto.
-   */
   const handleLogout = async () => { 
       await signOutUser(); 
-      handleCleanup(); // Limpa tudo visualmente e volta para a Home sem recarregar a URL
+      handleCleanup();
       playSound('logout');
   };
 
@@ -264,7 +274,7 @@ const App: React.FC = () => {
   if (authChecking) return (
     <div className="h-screen flex flex-col items-center justify-center bg-white">
         <div className="w-12 h-12 border-4 border-emerald-100 border-t-emerald-600 rounded-full animate-spin"></div>
-        <p className="mt-4 text-xs font-black text-gray-400 uppercase tracking-widest animate-pulse">Sincronizando...</p>
+        <p className="mt-4 text-xs font-black text-gray-400 uppercase tracking-widest animate-pulse">Sincronizando Rede...</p>
     </div>
   );
 

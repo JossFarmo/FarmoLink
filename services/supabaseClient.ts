@@ -1,3 +1,4 @@
+
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = 'https://fsagvxkwihqiscvjtjvz.supabase.co';
@@ -8,7 +9,8 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    storage: window.localStorage // Garante uso explícito do storage para evitar "ghost sessions"
+    storage: window.localStorage,
+    storageKey: 'farmolink-auth-token' // Chave única para evitar conflitos com outros apps no mesmo domínio
   },
   global: {
     headers: { 'x-application-name': 'farmolink-web' }
@@ -17,13 +19,20 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
 
 /**
  * Utilitário de resiliência: Tenta executar uma função e repete se houver erro de rede.
+ * Agora com suporte a interrupção por timeout.
  */
 export const safeQuery = async <T>(fn: () => Promise<T>, retries = 2): Promise<T | null> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout global para qualquer query
+
     try {
-        return await fn();
+        const result = await fn();
+        clearTimeout(timeoutId);
+        return result;
     } catch (err: any) {
-        if (retries > 0 && (err.message?.includes('fetch') || err.name === 'TypeError')) {
-            await new Promise(res => setTimeout(res, 1500));
+        clearTimeout(timeoutId);
+        if (retries > 0 && (err.message?.includes('fetch') || err.name === 'TypeError' || err.name === 'AbortError')) {
+            await new Promise(res => setTimeout(res, 1000));
             return safeQuery(fn, retries - 1);
         }
         console.error("Falha persistente na query:", err);
