@@ -145,6 +145,22 @@ const App: React.FC = () => {
       }
   }, [products.length]);
 
+  // --- HEARTBEAT DE SESSÃO ---
+  // Verifica e renova o token a cada 5 minutos para evitar expiração após 50-60min
+  useEffect(() => {
+      if (!user) return;
+      const heartbeat = setInterval(async () => {
+          const { data: { session }, error } = await supabase.auth.getSession();
+          if (error || !session) {
+              console.error("Sessão perdida no heartbeat. Forçando logout.");
+              handleLogout();
+          } else {
+              console.log("Sessão renovada via Heartbeat.");
+          }
+      }, 5 * 60 * 1000); // 5 minutos
+      return () => clearInterval(heartbeat);
+  }, [user]);
+
   // MONITOR DE AUTENTICAÇÃO COM FAIL-SAFE
   useEffect(() => {
     let authTimeout = setTimeout(() => {
@@ -152,7 +168,7 @@ const App: React.FC = () => {
             console.warn("🕒 Timeout de segurança atingido na sincronização.");
             setAuthChecking(false);
         }
-    }, 8000); // 8 segundos de segurança para não travar a tela
+    }, 8000);
 
     const initAuth = async () => {
         try {
