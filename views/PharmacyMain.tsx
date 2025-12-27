@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Card, Badge, Button } from '../components/UI';
 import { Order, OrderStatus } from '../types';
@@ -6,7 +7,7 @@ import {
     Clock, DollarSign, Package, Star, RefreshCw, Phone, 
     MessageCircle, X, Truck, ChevronRight, Search, 
     Bike, User as UserIcon, CheckCircle2, XCircle,
-    ArrowRight, ExternalLink, Store, AlertCircle, BellRing, Loader2, Power
+    ArrowRight, ExternalLink, Store, AlertCircle, BellRing, Loader2, Power, Calendar
 } from 'lucide-react';
 import { playSound } from '../services/soundService';
 
@@ -226,7 +227,7 @@ export const PharmacyOrdersModule = ({ pharmacyId, onUpdate }: { pharmacyId: str
                 <table className="w-full text-left border-collapse">
                     <thead className="bg-gray-50/50 border-b">
                         <tr className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                            <th className="p-6">ID / Tipo</th>
+                            <th className="p-6">ID / Hora</th>
                             <th className="p-6">Cliente</th>
                             <th className="p-6">Total</th>
                             <th className="p-6">Status</th>
@@ -244,74 +245,99 @@ export const PharmacyOrdersModule = ({ pharmacyId, onUpdate }: { pharmacyId: str
                                 </td>
                             </tr>
                         ) : (
-                            filteredOrders.map(o => {
+                            filteredOrders.map((o, idx) => {
                                 const action = getActionConfig(o.status, o.type);
+                                
+                                // Lógica de separação por dia para o histórico da farmácia
+                                const currentDateStr = o.date.split(',')[0].trim();
+                                const prevOrder = filteredOrders[idx - 1];
+                                const prevDateStr = prevOrder ? prevOrder.date.split(',')[0].trim() : null;
+                                const isNewDay = currentDateStr !== prevDateStr;
+
                                 return (
-                                    <tr key={o.id} className="hover:bg-gray-50 transition-colors group">
-                                        <td className="p-6">
-                                            <p className="font-mono text-xs font-black text-gray-800 uppercase tracking-tighter">#{o.id.slice(0, 8)}</p>
-                                            <p className="text-[10px] font-bold text-gray-400 mt-1 uppercase flex items-center gap-1">
-                                                {o.type === 'DELIVERY' ? <Bike size={10}/> : <Store size={10}/>} {o.type === 'DELIVERY' ? 'Entrega' : 'Levantamento'}
-                                            </p>
-                                        </td>
-                                        <td className="p-6">
-                                            <p className="font-black text-gray-800 text-sm mb-2">{o.customerName}</p>
-                                            <div className="flex gap-2">
-                                                <a 
-                                                    href={`tel:${o.customerPhone}`} 
-                                                    className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-600 rounded-lg text-[9px] font-black uppercase hover:bg-emerald-600 hover:text-white transition-all"
-                                                >
-                                                    <Phone size={10}/> Ligar
-                                                </a>
-                                                <a 
-                                                    href={`https://wa.me/${o.customerPhone?.replace(/\D/g,'')}`} 
-                                                    target="_blank" 
-                                                    className="flex items-center gap-1.5 px-3 py-1 bg-green-50 text-green-600 rounded-lg text-[9px] font-black uppercase hover:bg-green-600 hover:text-white transition-all"
-                                                >
-                                                    <MessageCircle size={10}/> WhatsApp
-                                                </a>
-                                            </div>
-                                        </td>
-                                        <td className="p-6">
-                                            <span className="font-black text-gray-700 text-sm">Kz {o.total.toLocaleString()}</span>
-                                        </td>
-                                        <td className="p-6">
-                                            <Badge color={
-                                                o.status === OrderStatus.COMPLETED ? 'green' : 
-                                                o.status.includes('Cancelado') ? 'red' : 
-                                                o.status === OrderStatus.PREPARING ? 'blue' : 'yellow'
-                                            }>
-                                                {o.status.toUpperCase()}
-                                            </Badge>
-                                        </td>
-                                        <td className="p-6">
-                                            <div className="flex items-center justify-end gap-2">
-                                                {action ? (
-                                                    <>
-                                                        <button 
-                                                            onClick={() => handleAction(o.id, action.next)}
-                                                            className={`flex items-center gap-2 px-6 py-2.5 rounded-2xl text-[11px] font-black uppercase transition-all shadow-sm ${action.color}`}
-                                                        >
-                                                            {action.label} {action.icon}
-                                                        </button>
-                                                        {o.status === OrderStatus.PENDING && (
+                                    <React.Fragment key={o.id}>
+                                        {isNewDay && (
+                                            <tr className="bg-gray-50/50">
+                                                <td colSpan={5} className="p-4 text-center border-y border-gray-100">
+                                                    <div className="flex items-center justify-center gap-4">
+                                                        <div className="h-[1px] bg-gray-200 flex-1"></div>
+                                                        <span className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.3em] flex items-center gap-2 whitespace-nowrap">
+                                                            <Calendar size={12}/> {currentDateStr}
+                                                        </span>
+                                                        <div className="h-[1px] bg-gray-200 flex-1"></div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                        <tr className="hover:bg-gray-50 transition-colors group">
+                                            <td className="p-6">
+                                                <p className="font-mono text-[10px] font-black text-gray-400 uppercase tracking-tighter">#{o.id.slice(0, 8)}</p>
+                                                <p className="text-xs font-bold text-gray-800 mt-1 flex items-center gap-1">
+                                                    <Clock size={12} className="text-emerald-500"/> {o.date.split(',')[1]?.trim() || o.date}
+                                                </p>
+                                                <p className="text-[9px] font-bold text-gray-400 uppercase mt-1">
+                                                    {o.type === 'DELIVERY' ? 'ENTREGA' : 'RETIRADA'}
+                                                </p>
+                                            </td>
+                                            <td className="p-6">
+                                                <p className="font-black text-gray-800 text-sm mb-2">{o.customerName}</p>
+                                                <div className="flex gap-2">
+                                                    <a 
+                                                        href={`tel:${o.customerPhone}`} 
+                                                        className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-600 rounded-lg text-[9px] font-black uppercase hover:bg-emerald-600 hover:text-white transition-all"
+                                                    >
+                                                        <Phone size={10}/> Ligar
+                                                    </a>
+                                                    <a 
+                                                        href={`https://wa.me/${o.customerPhone?.replace(/\D/g,'')}`} 
+                                                        target="_blank" 
+                                                        className="flex items-center gap-1.5 px-3 py-1 bg-green-50 text-green-600 rounded-lg text-[9px] font-black uppercase hover:bg-green-600 hover:text-white transition-all"
+                                                    >
+                                                        <MessageCircle size={10}/> WhatsApp
+                                                    </a>
+                                                </div>
+                                            </td>
+                                            <td className="p-6">
+                                                <span className="font-black text-gray-700 text-sm">Kz {o.total.toLocaleString()}</span>
+                                            </td>
+                                            <td className="p-6">
+                                                <Badge color={
+                                                    o.status === OrderStatus.COMPLETED ? 'green' : 
+                                                    o.status.includes('Cancelado') ? 'red' : 
+                                                    o.status === OrderStatus.PREPARING ? 'blue' : 'yellow'
+                                                }>
+                                                    {o.status.toUpperCase()}
+                                                </Badge>
+                                            </td>
+                                            <td className="p-6">
+                                                <div className="flex items-center justify-end gap-2">
+                                                    {action ? (
+                                                        <>
                                                             <button 
-                                                                onClick={() => handleAction(o.id, OrderStatus.REJECTED)}
-                                                                className="p-2.5 bg-red-50 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all"
-                                                                title="Recusar Pedido"
+                                                                onClick={() => handleAction(o.id, action.next)}
+                                                                className={`flex items-center gap-2 px-6 py-2.5 rounded-2xl text-[11px] font-black uppercase transition-all shadow-sm ${action.color}`}
                                                             >
-                                                                <XCircle size={18}/>
+                                                                {action.label} {action.icon}
                                                             </button>
-                                                        )}
-                                                    </>
-                                                ) : (
-                                                    <span className="text-[10px] font-black text-gray-300 uppercase flex items-center gap-1">
-                                                        <CheckCircle2 size={14}/> Finalizado
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </td>
-                                    </tr>
+                                                            {o.status === OrderStatus.PENDING && (
+                                                                <button 
+                                                                    onClick={() => handleAction(o.id, OrderStatus.REJECTED)}
+                                                                    className="p-2.5 bg-red-50 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all"
+                                                                    title="Recusar Pedido"
+                                                                >
+                                                                    <XCircle size={18}/>
+                                                                </button>
+                                                            )}
+                                                        </>
+                                                    ) : (
+                                                        <span className="text-[10px] font-black text-gray-300 uppercase flex items-center gap-1">
+                                                            <CheckCircle2 size={14}/> Finalizado
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </React.Fragment>
                                 );
                             })
                         )}

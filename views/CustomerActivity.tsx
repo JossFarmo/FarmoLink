@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Camera, XCircle, FileText, ChevronDown, Clock, Check, RefreshCw, Package, Store, MapPin, Phone, CreditCard, Info, CheckCircle, Mail, ThumbsUp, MessageCircle, Loader2, Bike, X, Calendar, Star, ShoppingBag, Plus, Eye } from 'lucide-react';
 import { Order, PrescriptionRequest, PrescriptionQuote, OrderStatus, User, Pharmacy } from '../types';
 import { Button, Card, Badge, Toast } from '../components/UI';
@@ -9,16 +9,20 @@ import { uploadImageToCloudinary } from '../services/cloudinaryService';
 
 export const CustomerOrdersView = ({ orders, pharmacies, onRefresh }: { orders: Order[], pharmacies?: Pharmacy[], onRefresh: () => void }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [currentTime, setCurrentTime] = useState(new Date());
-  
-  // Estados para Avaliação
   const [ratingOrder, setRatingOrder] = useState<Order | null>(null);
   const [stars, setStars] = useState(5);
   const [comment, setComment] = useState('');
   const [isSubmittingRating, setIsSubmittingRating] = useState(false);
 
-  useEffect(() => {
-    setCurrentTime(new Date()); 
+  // Agrupar pedidos por data para melhor navegação
+  const groupedOrders = useMemo(() => {
+    const groups: { [key: string]: Order[] } = {};
+    orders.forEach(o => {
+        const datePart = o.date.split(',')[0].trim();
+        if (!groups[datePart]) groups[datePart] = [];
+        groups[datePart].push(o);
+    });
+    return groups;
   }, [orders]);
 
   const handleCancelOrder = async (orderId: string) => {
@@ -88,12 +92,15 @@ export const CustomerOrdersView = ({ orders, pharmacies, onRefresh }: { orders: 
   }
 
   return (
-  <div className="max-w-4xl mx-auto space-y-6 animate-fade-in pb-20">
+  <div className="max-w-4xl mx-auto space-y-8 animate-fade-in pb-20">
     <div className="flex justify-between items-center px-4">
-        <h1 className="text-2xl font-black text-gray-800">Meus Pedidos</h1>
-        <div className="flex items-center gap-2 text-[10px] font-black text-gray-400 uppercase tracking-widest">
-             <RefreshCw size={12}/> Atualizado via Realtime
+        <div>
+            <h1 className="text-2xl font-black text-gray-800">Meus Pedidos</h1>
+            <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Histórico de compras e entregas</p>
         </div>
+        <button onClick={onRefresh} className="flex items-center gap-2 text-[10px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50 px-4 py-2 rounded-xl hover:bg-emerald-100 transition-all">
+             <RefreshCw size={12}/> Sincronizar
+        </button>
     </div>
     
     {orders.length === 0 && (
@@ -104,122 +111,135 @@ export const CustomerOrdersView = ({ orders, pharmacies, onRefresh }: { orders: 
       </div>
     )}
 
-    {orders.map((o: Order) => {
-      const timeline = getTimelineSteps(o.status, o.type);
-      const friendly = getFriendlyStatus(o.status);
-      const pharmacy = pharmacies?.find(p => p.id === o.pharmacyId);
-      const isCancelled = o.status === OrderStatus.CANCELLED || o.status === OrderStatus.REJECTED;
-      const canConfirm = o.status === OrderStatus.OUT_FOR_DELIVERY || o.status === OrderStatus.READY_FOR_PICKUP;
-      const isCompleted = o.status === OrderStatus.COMPLETED;
+    {Object.entries(groupedOrders).map(([date, dayOrders]) => (
+        <div key={date} className="space-y-4">
+            <div className="flex items-center gap-4 px-4">
+                <div className="h-[1px] bg-gray-200 flex-1"></div>
+                <span className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] flex items-center gap-2">
+                    <Calendar size={12}/> {date}
+                </span>
+                <div className="h-[1px] bg-gray-200 flex-1"></div>
+            </div>
 
-      return (
-      <Card key={o.id} className="p-0 overflow-hidden transition-all hover:shadow-xl rounded-[32px] border-gray-100 mb-4">
-         <div className="p-6 cursor-pointer hover:bg-gray-50/50 transition-colors" onClick={() => { playSound('click'); setExpandedId(expandedId === o.id ? null : o.id); }}>
-           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-             <div className="flex items-center gap-4">
-                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner ${isCompleted ? 'bg-emerald-50 text-emerald-600' : (isCancelled ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600')}`}>
-                    <ShoppingBag size={28}/>
-                </div>
-                <div>
-                    <h3 className="font-black text-gray-800 flex items-center gap-2">
-                        Pedido #{o.id.slice(0,8).toUpperCase()}
-                    </h3>
-                    <div className="flex flex-wrap items-center gap-2 mt-1">
-                        <Badge color={friendly.color as any}>{friendly.text.toUpperCase()}</Badge>
-                        <span className="text-[10px] text-emerald-600 font-black bg-emerald-50 px-2 py-0.5 rounded-md flex items-center gap-1">
-                            <Clock size={10}/> {o.date}
-                        </span>
-                    </div>
-                </div>
-             </div>
-             <div className="text-left sm:text-right w-full sm:w-auto">
-                <p className="text-xs text-gray-400 font-bold uppercase mb-1">{pharmacy?.name || 'Farmácia'}</p>
-                <p className="font-black text-xl text-emerald-600">Kz {o.total.toLocaleString()}</p>
-             </div>
-           </div>
-         </div>
+            {/* Fix: Casting dayOrders to Order[] as TypeScript might infer it as unknown from Object.entries */}
+            {(dayOrders as Order[]).map((o: Order) => {
+              const timeline = getTimelineSteps(o.status, o.type);
+              const friendly = getFriendlyStatus(o.status);
+              const pharmacy = pharmacies?.find(p => p.id === o.pharmacyId);
+              const isCancelled = o.status === OrderStatus.CANCELLED || o.status === OrderStatus.REJECTED;
+              const canConfirm = o.status === OrderStatus.OUT_FOR_DELIVERY || o.status === OrderStatus.READY_FOR_PICKUP;
+              const isCompleted = o.status === OrderStatus.COMPLETED;
 
-         {expandedId === o.id && (
-           <div className="border-t border-gray-100 bg-gray-50/50 p-6 sm:p-8 animate-fade-in">
-              {!isCancelled && (
-                  <div className="mb-10 px-4">
-                    <div className="relative flex justify-between items-center max-w-2xl mx-auto">
-                        <div className="absolute top-1/2 left-0 w-full h-[2px] bg-gray-200 -z-0 -translate-y-1/2"></div>
-                        {timeline.map((step, idx) => (
-                            <div key={idx} className="relative z-10 flex flex-col items-center">
-                                <div className={`w-10 h-10 rounded-full flex items-center justify-center border-4 transition-all duration-500 ${
-                                    step.active 
-                                    ? 'bg-emerald-600 border-emerald-100 text-white scale-110 shadow-lg' 
-                                    : 'bg-white border-gray-100 text-gray-300'
-                                }`}>
-                                    <step.icon size={16} />
-                                </div>
-                                <span className={`text-[9px] font-black mt-3 uppercase tracking-tighter ${step.active ? 'text-emerald-800' : 'text-gray-400'}`}>{step.label}</span>
+              return (
+              <Card key={o.id} className="p-0 overflow-hidden transition-all hover:shadow-xl rounded-[32px] border-gray-100 mb-4">
+                 <div className="p-6 cursor-pointer hover:bg-gray-50/50 transition-colors" onClick={() => { playSound('click'); setExpandedId(expandedId === o.id ? null : o.id); }}>
+                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                     <div className="flex items-center gap-4">
+                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner ${isCompleted ? 'bg-emerald-50 text-emerald-600' : (isCancelled ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600')}`}>
+                            <ShoppingBag size={28}/>
+                        </div>
+                        <div>
+                            <h3 className="font-black text-gray-800 flex items-center gap-2">
+                                Pedido #{o.id.slice(0,8).toUpperCase()}
+                            </h3>
+                            <div className="flex flex-wrap items-center gap-2 mt-1">
+                                <Badge color={friendly.color as any}>{friendly.text.toUpperCase()}</Badge>
+                                <span className="text-[10px] text-emerald-600 font-black bg-emerald-50 px-2 py-0.5 rounded-md flex items-center gap-1">
+                                    <Clock size={10}/> {o.date.split(',')[1]?.trim() || o.date}
+                                </span>
                             </div>
-                        ))}
-                    </div>
-                  </div>
-              )}
-
-              <div className="grid md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <div className={`p-5 rounded-3xl border flex items-start gap-4 shadow-sm bg-white ${isCancelled ? 'border-red-100' : 'border-emerald-100'}`}>
-                        <div className={`p-3 rounded-2xl ${isCancelled ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                            {isCancelled ? <XCircle size={24}/> : <CheckCircle size={24}/>}
                         </div>
-                        <div className="flex-1">
-                            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Status Detalhado</p>
-                            <p className={`font-black text-base ${isCancelled ? 'text-red-700' : 'text-emerald-800'}`}>{friendly.text}</p>
-                            <p className="text-[10px] text-gray-500 mt-1">Identificamos o fluxo de {o.type === 'DELIVERY' ? 'Entrega' : 'Retirada'}.</p>
-                        </div>
-                    </div>
+                     </div>
+                     <div className="text-left sm:text-right w-full sm:w-auto">
+                        <p className="text-xs text-gray-400 font-bold uppercase mb-1">{pharmacy?.name || 'Farmácia'}</p>
+                        <p className="font-black text-xl text-emerald-600">Kz {o.total.toLocaleString()}</p>
+                     </div>
+                   </div>
+                 </div>
 
-                    <div className="flex flex-col gap-2 pt-2">
-                        {o.status === OrderStatus.PENDING && (
-                            <Button variant="danger" className="w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-red-100" onClick={() => handleCancelOrder(o.id)}>Cancelar Pedido</Button>
-                        )}
-                        {canConfirm && (
-                            <Button onClick={() => handleConfirmReceipt(o.id)} className="w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest bg-emerald-600 hover:bg-emerald-700 shadow-xl shadow-emerald-100 flex gap-2 animate-pulse">
-                               <ThumbsUp size={16} /> Confirmar que Recebi
-                            </Button>
-                        )}
-                        {isCompleted && (
-                            <button 
-                                onClick={() => setRatingOrder(o)} 
-                                className="w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest bg-yellow-400 text-yellow-900 hover:bg-yellow-500 transition-all shadow-lg flex items-center justify-center gap-2"
-                            >
-                               <Star size={16} className="fill-yellow-900"/> Avaliar Experiência
-                            </button>
-                        )}
-                    </div>
-                  </div>
+                 {expandedId === o.id && (
+                   <div className="border-t border-gray-100 bg-gray-50/50 p-6 sm:p-8 animate-fade-in">
+                      {!isCancelled && (
+                          <div className="mb-10 px-4">
+                            <div className="relative flex justify-between items-center max-w-2xl mx-auto">
+                                <div className="absolute top-1/2 left-0 w-full h-[2px] bg-gray-200 -z-0 -translate-y-1/2"></div>
+                                {timeline.map((step, idx) => (
+                                    <div key={idx} className="relative z-10 flex flex-col items-center">
+                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center border-4 transition-all duration-500 ${
+                                            step.active 
+                                            ? 'bg-emerald-600 border-emerald-100 text-white scale-110 shadow-lg' 
+                                            : 'bg-white border-gray-100 text-gray-300'
+                                        }`}>
+                                            <step.icon size={16} />
+                                        </div>
+                                        <span className={`text-[9px] font-black mt-3 uppercase tracking-tighter ${step.active ? 'text-emerald-800' : 'text-gray-400'}`}>{step.label}</span>
+                                    </div>
+                                ))}
+                            </div>
+                          </div>
+                      )}
 
-                  <div className="bg-white p-6 rounded-[32px] border border-gray-100 shadow-sm">
-                     <h5 className="font-black text-gray-800 text-xs uppercase mb-4 flex items-center gap-2 border-b pb-3 tracking-widest">
-                         <Package size={16} className="text-emerald-500"/> Detalhes do Carrinho
-                     </h5>
-                     <div className="space-y-3 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
-                        {o.items.map((item, idx) => (
-                            <div key={idx} className="flex justify-between items-center">
+                      <div className="grid md:grid-cols-2 gap-6">
+                          <div className="space-y-4">
+                            <div className={`p-5 rounded-3xl border flex items-start gap-4 shadow-sm bg-white ${isCancelled ? 'border-red-100' : 'border-emerald-100'}`}>
+                                <div className={`p-3 rounded-2xl ${isCancelled ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                                    {isCancelled ? <XCircle size={24}/> : <CheckCircle size={24}/>}
+                                </div>
                                 <div className="flex-1">
-                                    <p className="text-sm font-bold text-gray-700">{item.quantity}x {item.name}</p>
-                                    <p className="text-[9px] text-gray-400 font-bold uppercase tracking-tight">{item.category}</p>
+                                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Status Detalhado</p>
+                                    <p className={`font-black text-base ${isCancelled ? 'text-red-700' : 'text-emerald-800'}`}>{friendly.text}</p>
+                                    <p className="text-[10px] text-gray-500 mt-1">Identificamos o fluxo de {o.type === 'DELIVERY' ? 'Entrega' : 'Retirada'}.</p>
                                 </div>
-                                <span className="font-black text-gray-600 text-xs">Kz {(item.price * item.quantity).toLocaleString()}</span>
                             </div>
-                        ))}
-                     </div>
-                     <div className="mt-6 pt-4 border-t border-gray-100 flex justify-between items-center">
-                         <span className="text-xs font-black text-gray-400 uppercase tracking-widest">Total Pago</span>
-                         <span className="text-2xl font-black text-emerald-600">Kz {o.total.toLocaleString()}</span>
-                     </div>
-                  </div>
-              </div>
-           </div>
-         )}
-      </Card>
-      );
-    })}
+
+                            <div className="flex flex-col gap-2 pt-2">
+                                {o.status === OrderStatus.PENDING && (
+                                    <Button variant="danger" className="w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-red-100" onClick={() => handleCancelOrder(o.id)}>Cancelar Pedido</Button>
+                                )}
+                                {canConfirm && (
+                                    <Button onClick={() => handleConfirmReceipt(o.id)} className="w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest bg-emerald-600 hover:bg-emerald-700 shadow-xl shadow-emerald-100 flex gap-2 animate-pulse">
+                                       <ThumbsUp size={16} /> Confirmar que Recebi
+                                    </Button>
+                                )}
+                                {isCompleted && (
+                                    <button 
+                                        onClick={() => setRatingOrder(o)} 
+                                        className="w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest bg-yellow-400 text-yellow-900 hover:bg-yellow-500 transition-all shadow-lg flex items-center justify-center gap-2"
+                                    >
+                                       <Star size={16} className="fill-yellow-900"/> Avaliar Experiência
+                                    </button>
+                                )}
+                            </div>
+                          </div>
+
+                          <div className="bg-white p-6 rounded-[32px] border border-gray-100 shadow-sm">
+                             <h5 className="font-black text-gray-800 text-xs uppercase mb-4 flex items-center gap-2 border-b pb-3 tracking-widest">
+                                 <Package size={16} className="text-emerald-500"/> Detalhes do Carrinho
+                             </h5>
+                             <div className="space-y-3 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
+                                {o.items.map((item, idx) => (
+                                    <div key={idx} className="flex justify-between items-center">
+                                        <div className="flex-1">
+                                            <p className="text-sm font-bold text-gray-700">{item.quantity}x {item.name}</p>
+                                            <p className="text-[9px] text-gray-400 font-bold uppercase tracking-tight">{item.category}</p>
+                                        </div>
+                                        <span className="font-black text-gray-600 text-xs">Kz {(item.price * item.quantity).toLocaleString()}</span>
+                                    </div>
+                                ))}
+                             </div>
+                             <div className="mt-6 pt-4 border-t border-gray-100 flex justify-between items-center">
+                                 <span className="text-xs font-black text-gray-400 uppercase tracking-widest">Total Pago</span>
+                                 <span className="text-2xl font-black text-emerald-600">Kz {o.total.toLocaleString()}</span>
+                             </div>
+                          </div>
+                      </div>
+                   </div>
+                 )}
+              </Card>
+              );
+            })}
+        </div>
+    ))}
 
     {/* MODAL DE AVALIAÇÃO (RATING) */}
     {ratingOrder && (

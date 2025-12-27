@@ -30,7 +30,7 @@ import {
     fetchPharmacyById, getCacheForUser, setCacheForUser 
 } from './services/dataService';
 import { playSound } from './services/soundService';
-import { Home, Store, FileText, ShoppingBag, User as UserIcon, HelpCircle, BarChart3, Package, DollarSign, Settings, Activity, Users, Database, ShieldCheck, Megaphone, Star, ImageIcon, Loader2 } from 'lucide-react';
+import { Home, Store, FileText, ShoppingBag, User as UserIcon, HelpCircle, BarChart3, Package, DollarSign, Settings, Activity, Users, Database, ShieldCheck, Megaphone, Star, ImageIcon, Loader2, RotateCcw } from 'lucide-react';
 
 const CUSTOMER_MENU = [
     { id: 'home', label: 'Shopping', icon: Home },
@@ -68,6 +68,7 @@ const ADMIN_MENU = [
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
+  const [showResetButton, setShowResetButton] = useState(false); // Botão de pânico se demorar
   const [page, setPage] = useState('home'); 
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error' | 'info'} | null>(null);
 
@@ -87,14 +88,32 @@ const App: React.FC = () => {
   const lastRxCountRef = useRef(0);
   const isInitialLoadDone = useRef(false);
 
+  const handleCleanup = useCallback(() => {
+    setUser(null);
+    setPage('home');
+    setProducts([]);
+    setPharmacies([]);
+    setOrders([]);
+    setPrescriptions([]);
+    setCart([]);
+    setPharmacyStatus(null);
+    setCriticalAlert(null);
+    isInitialLoadDone.current = false;
+}, []);
+
+  const handleLogout = useCallback(async () => { 
+    await signOutUser(); 
+    handleCleanup();
+    playSound('logout');
+  }, [handleCleanup]);
+
   const loadData = useCallback(async (u: User, forceStatic = false) => {
       if (!u) return;
       try {
           if (!isInitialLoadDone.current || forceStatic) {
-              const [phData, prDataFetched] = await Promise.all([
-                  fetchPharmacies(u.role === UserRole.ADMIN),
-                  u.role === UserRole.PHARMACY && u.pharmacyId ? fetchProducts(u.pharmacyId) : fetchProducts()
-              ]);
+              const phData = await fetchPharmacies(u.role === UserRole.ADMIN);
+              const prDataFetched = u.role === UserRole.PHARMACY && u.pharmacyId ? await fetchProducts(u.pharmacyId) : await fetchProducts();
+              
               setPharmacies(phData || []);
               setProducts(prDataFetched || []);
               setCacheForUser(u.id, { pharmacies: phData || [], products: prDataFetched || [] });
@@ -145,30 +164,22 @@ const App: React.FC = () => {
       }
   }, [products.length]);
 
-  // --- HEARTBEAT DE SESSÃO ---
-  // Verifica e renova o token a cada 5 minutos para evitar expiração após 50-60min
-  useEffect(() => {
-      if (!user) return;
-      const heartbeat = setInterval(async () => {
-          const { data: { session }, error } = await supabase.auth.getSession();
-          if (error || !session) {
-              console.error("Sessão perdida no heartbeat. Forçando logout.");
-              handleLogout();
-          } else {
-              console.log("Sessão renovada via Heartbeat.");
-          }
-      }, 5 * 60 * 1000); // 5 minutos
-      return () => clearInterval(heartbeat);
-  }, [user]);
+  const handleLogin = useCallback((u: User) => {
+    setUser(u);
+    setPage(u.role === UserRole.CUSTOMER ? 'home' : (u.role === UserRole.PHARMACY ? 'dashboard' : 'overview'));
+    loadData(u);
+  }, [loadData]);
 
-  // MONITOR DE AUTENTICAÇÃO COM FAIL-SAFE
+  // MONITOR DE AUTENTICAÇÃO COM FAIL-SAFE MELHORADO
   useEffect(() => {
-    let authTimeout = setTimeout(() => {
-        if (authChecking) {
-            console.warn("🕒 Timeout de segurança atingido na sincronização.");
-            setAuthChecking(false);
-        }
-    }, 8000);
+    // Se após 4 segundos ainda estiver carregando, mostra opção de reset
+    const timer = setTimeout(() => {
+        if (authChecking) setShowResetButton(true);
+    }, 4000);
+
+    // Listener global para logout forçado (vindo de erros 401/403)
+    const handleForceLogout = () => handleLogout();
+    window.addEventListener('force-logout', handleForceLogout);
 
     const initAuth = async () => {
         try {
@@ -180,23 +191,18 @@ const App: React.FC = () => {
                     if (cached) {
                         setProducts(cached.products || []);
                         setPharmacies(cached.pharmacies || []);
-                        setOrders(cached.orders || []);
-                        setPrescriptions(cached.prescriptions || []);
                     }
                     handleLogin(u);
                 }
             }
         } catch (e) {
-            console.error("Erro na carga inicial:", e);
-            localStorage.removeItem('farmolink-auth-token');
+            console.error("Erro na inicialização:", e);
         } finally {
-            clearTimeout(authTimeout);
             setAuthChecking(false);
         }
     };
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("Auth Event:", event);
       if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
           const u = await getCurrentUser();
           if (u) handleLogin(u);
@@ -210,9 +216,20 @@ const App: React.FC = () => {
     initAuth();
     return () => { 
         subscription.unsubscribe();
-        clearTimeout(authTimeout);
+        clearTimeout(timer);
+        window.removeEventListener('force-logout', handleForceLogout);
     };
-  }, []);
+  }, [handleLogin, handleLogout, handleCleanup, authChecking]);
+
+  // Heartbeat para manter sessão viva
+  useEffect(() => {
+      if (!user) return;
+      const heartbeat = setInterval(async () => {
+          const { error } = await supabase.auth.getSession();
+          if (error) handleLogout();
+      }, 5 * 60 * 1000); 
+      return () => clearInterval(heartbeat);
+  }, [user, handleLogout]);
 
   useEffect(() => {
       if (!user) return;
@@ -223,31 +240,6 @@ const App: React.FC = () => {
           .subscribe();
       return () => { supabase.removeChannel(channel); };
   }, [user, loadData]);
-
-  const handleCleanup = () => {
-      setUser(null);
-      setPage('home');
-      setProducts([]);
-      setPharmacies([]);
-      setOrders([]);
-      setPrescriptions([]);
-      setCart([]);
-      setPharmacyStatus(null);
-      setCriticalAlert(null);
-      isInitialLoadDone.current = false;
-  };
-
-  const handleLogin = (u: User) => {
-    setUser(u);
-    setPage(u.role === UserRole.CUSTOMER ? 'home' : (u.role === UserRole.PHARMACY ? 'dashboard' : 'overview'));
-    loadData(u);
-  };
-
-  const handleLogout = async () => { 
-      await signOutUser(); 
-      handleCleanup();
-      playSound('logout');
-  };
 
   const handleAddToCart = (product: Product) => {
       setCart(prev => {
@@ -287,10 +279,28 @@ const App: React.FC = () => {
       }
   };
 
+  const forceNuclearReset = () => {
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.reload();
+  };
+
   if (authChecking) return (
-    <div className="h-screen flex flex-col items-center justify-center bg-white">
+    <div className="h-screen flex flex-col items-center justify-center bg-white p-6 text-center">
         <div className="w-12 h-12 border-4 border-emerald-100 border-t-emerald-600 rounded-full animate-spin"></div>
         <p className="mt-4 text-xs font-black text-gray-400 uppercase tracking-widest animate-pulse">Sincronizando Rede...</p>
+        
+        {showResetButton && (
+            <div className="mt-12 animate-fade-in">
+                <p className="text-xs text-gray-400 mb-4 font-medium">Demorando muito? Pode ser um erro de cache.</p>
+                <button 
+                    onClick={forceNuclearReset}
+                    className="flex items-center gap-2 px-6 py-3 bg-gray-100 text-gray-600 rounded-2xl text-[10px] font-black uppercase hover:bg-emerald-50 hover:text-emerald-600 transition-all border border-gray-200"
+                >
+                    <RotateCcw size={14}/> Limpar Cache e Recarregar
+                </button>
+            </div>
+        )}
     </div>
   );
 
