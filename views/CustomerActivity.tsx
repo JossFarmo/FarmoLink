@@ -107,13 +107,13 @@ export const CustomerOrdersView = ({ orders, pharmacies, onRefresh }: { orders: 
       <div className="text-center py-20 bg-white rounded-[40px] border border-dashed border-gray-200">
          <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-300"><Package size={40}/></div>
          <h3 className="text-lg font-black text-gray-700 uppercase">Sem pedidos ainda</h3>
-         <p className="text-gray-400 text-sm">Suas compras no FarmoLink aparecerão aqui.</p>
+         <p className="text-gray-400 text-sm">Suas compras aparecerão aqui.</p>
       </div>
     )}
 
     {Object.entries(groupedOrders).map(([date, dayOrders]) => (
         <div key={date} className="space-y-4">
-            <div className="flex items-center gap-4 px-4">
+            <div className="flex items-center gap-4 px-4 pt-6">
                 <div className="h-[1px] bg-gray-200 flex-1"></div>
                 <span className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] flex items-center gap-2">
                     <Calendar size={12}/> {date}
@@ -121,17 +121,15 @@ export const CustomerOrdersView = ({ orders, pharmacies, onRefresh }: { orders: 
                 <div className="h-[1px] bg-gray-200 flex-1"></div>
             </div>
 
-            {/* Fix: Casting dayOrders to Order[] as TypeScript might infer it as unknown from Object.entries */}
             {(dayOrders as Order[]).map((o: Order) => {
               const timeline = getTimelineSteps(o.status, o.type);
               const friendly = getFriendlyStatus(o.status);
               const pharmacy = pharmacies?.find(p => p.id === o.pharmacyId);
               const isCancelled = o.status === OrderStatus.CANCELLED || o.status === OrderStatus.REJECTED;
-              const canConfirm = o.status === OrderStatus.OUT_FOR_DELIVERY || o.status === OrderStatus.READY_FOR_PICKUP;
               const isCompleted = o.status === OrderStatus.COMPLETED;
 
               return (
-              <Card key={o.id} className="p-0 overflow-hidden transition-all hover:shadow-xl rounded-[32px] border-gray-100 mb-4">
+              <Card key={o.id} className="p-0 overflow-hidden transition-all hover:shadow-xl rounded-[32px] border-gray-100">
                  <div className="p-6 cursor-pointer hover:bg-gray-50/50 transition-colors" onClick={() => { playSound('click'); setExpandedId(expandedId === o.id ? null : o.id); }}>
                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                      <div className="flex items-center gap-4">
@@ -188,7 +186,7 @@ export const CustomerOrdersView = ({ orders, pharmacies, onRefresh }: { orders: 
                                 <div className="flex-1">
                                     <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Status Detalhado</p>
                                     <p className={`font-black text-base ${isCancelled ? 'text-red-700' : 'text-emerald-800'}`}>{friendly.text}</p>
-                                    <p className="text-[10px] text-gray-500 mt-1">Identificamos o fluxo de {o.type === 'DELIVERY' ? 'Entrega' : 'Retirada'}.</p>
+                                    <p className="text-[10px] text-gray-500 mt-1">Fluxo de {o.type === 'DELIVERY' ? 'Entrega' : 'Retirada'}.</p>
                                 </div>
                             </div>
 
@@ -196,9 +194,9 @@ export const CustomerOrdersView = ({ orders, pharmacies, onRefresh }: { orders: 
                                 {o.status === OrderStatus.PENDING && (
                                     <Button variant="danger" className="w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-red-100" onClick={() => handleCancelOrder(o.id)}>Cancelar Pedido</Button>
                                 )}
-                                {canConfirm && (
-                                    <Button onClick={() => handleConfirmReceipt(o.id)} className="w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest bg-emerald-600 hover:bg-emerald-700 shadow-xl shadow-emerald-100 flex gap-2 animate-pulse">
-                                       <ThumbsUp size={16} /> Confirmar que Recebi
+                                {(o.status === OrderStatus.OUT_FOR_DELIVERY || o.status === OrderStatus.READY_FOR_PICKUP) && (
+                                    <Button onClick={() => handleConfirmReceipt(o.id)} className="w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest bg-emerald-600 hover:bg-emerald-700 shadow-xl shadow-emerald-100 flex gap-2">
+                                       <ThumbsUp size={16} /> Confirmar Recebimento
                                     </Button>
                                 )}
                                 {isCompleted && (
@@ -214,21 +212,20 @@ export const CustomerOrdersView = ({ orders, pharmacies, onRefresh }: { orders: 
 
                           <div className="bg-white p-6 rounded-[32px] border border-gray-100 shadow-sm">
                              <h5 className="font-black text-gray-800 text-xs uppercase mb-4 flex items-center gap-2 border-b pb-3 tracking-widest">
-                                 <Package size={16} className="text-emerald-500"/> Detalhes do Carrinho
+                                 <Package size={16} className="text-emerald-500"/> Carrinho
                              </h5>
                              <div className="space-y-3 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
                                 {o.items.map((item, idx) => (
                                     <div key={idx} className="flex justify-between items-center">
                                         <div className="flex-1">
                                             <p className="text-sm font-bold text-gray-700">{item.quantity}x {item.name}</p>
-                                            <p className="text-[9px] text-gray-400 font-bold uppercase tracking-tight">{item.category}</p>
                                         </div>
                                         <span className="font-black text-gray-600 text-xs">Kz {(item.price * item.quantity).toLocaleString()}</span>
                                     </div>
                                 ))}
                              </div>
                              <div className="mt-6 pt-4 border-t border-gray-100 flex justify-between items-center">
-                                 <span className="text-xs font-black text-gray-400 uppercase tracking-widest">Total Pago</span>
+                                 <span className="text-xs font-black text-gray-400 uppercase tracking-widest">Total</span>
                                  <span className="text-2xl font-black text-emerald-600">Kz {o.total.toLocaleString()}</span>
                              </div>
                           </div>
@@ -241,14 +238,14 @@ export const CustomerOrdersView = ({ orders, pharmacies, onRefresh }: { orders: 
         </div>
     ))}
 
-    {/* MODAL DE AVALIAÇÃO (RATING) */}
+    {/* MODAL DE AVALIAÇÃO */}
     {ratingOrder && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-emerald-950/80 backdrop-blur-md p-4 animate-fade-in">
             <Card className="w-full max-w-md p-10 shadow-2xl animate-scale-in rounded-[40px] border-none text-center">
                 <div className="flex justify-between items-center mb-8">
                     <div className="text-left">
                         <h3 className="font-black text-2xl text-gray-800">Sua Opinião</h3>
-                        <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Ajude a Farmácia {pharmacies?.find(p=>p.id===ratingOrder.pharmacyId)?.name}</p>
+                        <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Avalie a Farmácia Parceira</p>
                     </div>
                     <button onClick={() => setRatingOrder(null)} className="p-2 bg-gray-50 rounded-full hover:bg-red-50 text-gray-300 hover:text-red-500 transition-all"><X size={24}/></button>
                 </div>
@@ -256,22 +253,21 @@ export const CustomerOrdersView = ({ orders, pharmacies, onRefresh }: { orders: 
                 <div className="flex justify-center gap-3 mb-10">
                     {[1,2,3,4,5].map(n => (
                         <button key={n} onClick={() => { setStars(n); playSound('click'); }} className="transition-transform active:scale-90">
-                            <Star size={44} className={n <= stars ? "text-yellow-400 fill-yellow-400 drop-shadow-[0_0_8px_rgba(250,204,21,0.5)]" : "text-gray-100"} />
+                            <Star size={44} className={n <= stars ? "text-yellow-400 fill-yellow-400" : "text-gray-100"} />
                         </button>
                     ))}
                 </div>
 
                 <textarea 
                     className="w-full p-6 border-2 border-gray-50 rounded-3xl h-32 text-sm outline-none focus:ring-4 focus:ring-emerald-100 focus:border-emerald-500 bg-gray-50 mb-8 transition-all font-medium" 
-                    placeholder="O que achou do atendimento e do tempo de entrega? (Opcional)"
+                    placeholder="Deixe seu comentário (opcional)..."
                     value={comment}
                     onChange={e => setComment(e.target.value)}
                 />
 
-                <Button onClick={handleSendRating} disabled={isSubmittingRating} className="w-full py-5 font-black text-lg bg-emerald-600 rounded-3xl shadow-xl shadow-emerald-900/20">
+                <Button onClick={handleSendRating} disabled={isSubmittingRating} className="w-full py-5 font-black text-lg bg-emerald-600 rounded-3xl shadow-xl">
                     {isSubmittingRating ? <Loader2 className="animate-spin"/> : "Enviar Avaliação"}
                 </Button>
-                <p className="text-[10px] text-gray-400 font-bold mt-4 uppercase tracking-widest">Sua avaliação será pública para outros clientes.</p>
             </Card>
         </div>
     )}
@@ -315,7 +311,7 @@ export const PrescriptionUploadView = ({ pharmacies, user, onNavigate }: { pharm
     if (!cloudinaryUrl) {
         setIsSending(false);
         playSound('error');
-        alert("Erro ao processar imagem. Tente novamente ou use uma imagem menor.");
+        alert("Erro ao processar imagem.");
         return;
     }
 
@@ -323,11 +319,11 @@ export const PrescriptionUploadView = ({ pharmacies, user, onNavigate }: { pharm
     setIsSending(false);
     if (success) {
       playSound('save');
-      alert("Receita enviada com sucesso! Aguarde os orçamentos.");
+      alert("Receita enviada com sucesso!");
       onNavigate('prescriptions');
     } else {
       playSound('error');
-      alert("Erro ao enviar receita ao sistema.");
+      alert("Erro ao enviar receita.");
     }
   };
 
@@ -339,7 +335,7 @@ export const PrescriptionUploadView = ({ pharmacies, user, onNavigate }: { pharm
     <div className="max-w-2xl mx-auto space-y-8 animate-fade-in pb-20 px-4">
       <div className="text-center">
         <h1 className="text-3xl font-black text-gray-800">Enviar Receita Médica</h1>
-        <p className="text-gray-500 mt-2">Nossas farmácias parceiras analisarão sua receita e enviarão orçamentos.</p>
+        <p className="text-gray-500 mt-2">Nossas farmácias parceiras enviarão orçamentos para você.</p>
       </div>
 
       <Card className="p-4 rounded-[40px] shadow-sm border-emerald-50">
@@ -360,12 +356,12 @@ export const PrescriptionUploadView = ({ pharmacies, user, onNavigate }: { pharm
       </Card>
 
       <div className="space-y-2">
-        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Mensagem para o Farmacêutico</label>
+        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Observações</label>
         <textarea 
           value={notes} 
           onChange={e => setNotes(e.target.value)} 
           className="w-full p-6 bg-white border border-gray-100 rounded-3xl focus:ring-4 focus:ring-emerald-100 outline-none h-32 font-medium text-sm transition-all" 
-          placeholder="Ex: Preciso também de álcool gel, se tiverem em stock..." 
+          placeholder="Ex: Preciso também de álcool gel..." 
         />
       </div>
 
@@ -383,7 +379,7 @@ export const PrescriptionUploadView = ({ pharmacies, user, onNavigate }: { pharm
 
       <Button onClick={handleSubmit} disabled={isSending} className="w-full py-5 rounded-3xl font-black text-lg shadow-xl shadow-emerald-100">
         {isSending ? (
-            <span className="flex items-center gap-2 uppercase tracking-widest text-sm"><Loader2 className="animate-spin" /> Processando Imagem...</span>
+            <span className="flex items-center gap-2 uppercase tracking-widest text-sm"><Loader2 className="animate-spin" /> Processando...</span>
         ) : <span className="uppercase tracking-widest">Solicitar Cotações</span>}
       </Button>
     </div>
@@ -398,17 +394,17 @@ export const PrescriptionsListView = ({ requests, user, onNavigate }: { requests
     if (processingQuoteId) return;
     if (!user.phone || user.phone.length < 9) {
         playSound('error');
-        alert("Atenção: Precisamos do seu número de telemóvel para entrega.\n\nPor favor, atualize seu perfil.");
+        alert("Atualize seu perfil com um número de telefone válido.");
         onNavigate('profile');
         return;
     }
 
-    if (confirm(`Aceitar orçamento de Kz ${quote.totalPrice.toLocaleString()} da farmácia ${quote.pharmacyName}? Todas as outras ofertas para esta receita serão canceladas.`)) {
+    if (confirm(`Aceitar orçamento de Kz ${quote.totalPrice.toLocaleString()} da farmácia ${quote.pharmacyName}?`)) {
        setProcessingQuoteId(quote.id);
        const success = await acceptQuote(quote, user.name, user.address || '', user.phone);
        if (success) {
          playSound('cash');
-         alert("Orçamento aceito! Um pedido foi gerado.");
+         alert("Orçamento aceito! Verifique seus pedidos.");
          onNavigate('orders');
        } else {
          playSound('error');
@@ -419,23 +415,17 @@ export const PrescriptionsListView = ({ requests, user, onNavigate }: { requests
   };
 
   const handleRejectQuote = async (quoteId: string) => {
-      if(!confirm('Deseja realmente recusar este orçamento?')) return;
+      if(!confirm('Recusar este orçamento?')) return;
       setProcessingQuoteId(quoteId);
-      const success = await rejectCustomerQuote(quoteId);
+      await rejectCustomerQuote(quoteId);
       setProcessingQuoteId(null);
-      if(success) {
-          playSound('click');
-          window.location.reload();
-      }
+      window.location.reload();
   };
 
   const handleCancelRequest = async (requestId: string) => {
-      if(confirm('Deseja cancelar esta solicitação?')) {
-          const success = await deletePrescriptionRequest(requestId);
-          if(success) {
-              playSound('trash');
-              window.location.reload();
-          }
+      if(confirm('Cancelar solicitação?')) {
+          await deletePrescriptionRequest(requestId);
+          window.location.reload();
       }
   }
 
@@ -444,7 +434,7 @@ export const PrescriptionsListView = ({ requests, user, onNavigate }: { requests
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
             <h1 className="text-3xl font-black text-gray-800">Arquivo de Receitas</h1>
-            <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Histórico de orçamentos e pedidos digitais</p>
+            <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Cotações recebidas</p>
         </div>
         <button onClick={() => onNavigate('upload-rx')} className="bg-emerald-600 text-white px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center gap-2 hover:bg-emerald-700 transition-all shadow-lg"><Plus size={16}/> Nova Receita</button>
       </div>
@@ -452,7 +442,7 @@ export const PrescriptionsListView = ({ requests, user, onNavigate }: { requests
       {requests.length === 0 && (
          <div className="text-center py-20 bg-white rounded-[40px] border border-dashed border-gray-200">
            <FileText className="w-16 h-16 text-gray-200 mx-auto mb-4"/>
-           <p className="text-gray-400 font-black uppercase tracking-widest text-sm">Nenhuma receita enviada ainda</p>
+           <p className="text-gray-400 font-black uppercase tracking-widest text-sm">Nenhuma receita enviada</p>
          </div>
       )}
 
@@ -471,14 +461,14 @@ export const PrescriptionsListView = ({ requests, user, onNavigate }: { requests
                             <p className="text-[10px] text-emerald-600 font-black uppercase tracking-widest mt-1">Enviado em {req.date}</p>
                         </div>
                         <Badge color={req.status === 'COMPLETED' ? 'green' : 'yellow'}>
-                            {req.status === 'COMPLETED' ? 'ATENDIDA' : 'EM ANÁLISE'}
+                            {req.status === 'COMPLETED' ? 'FINALIZADA' : 'EM ANÁLISE'}
                         </Badge>
                     </div>
                     <div className="mt-4 flex flex-wrap justify-center sm:justify-start gap-4">
                         <div className="flex items-center gap-1.5 text-[10px] font-black text-blue-600 bg-blue-50 px-3 py-1 rounded-full uppercase">
                             <MessageCircle size={14}/> {req.quotes?.length || 0} Orçamentos
                         </div>
-                        {expandedId !== req.id && <span className="text-[10px] font-black text-gray-300 uppercase tracking-widest flex items-center gap-1 animate-pulse">Detalhes <ChevronDown size={14}/></span>}
+                        {expandedId !== req.id && <span className="text-[10px] font-black text-gray-300 uppercase tracking-widest flex items-center gap-1 animate-pulse">Ver Detalhes <ChevronDown size={14}/></span>}
                     </div>
                 </div>
             </div>
@@ -504,14 +494,12 @@ export const PrescriptionsListView = ({ requests, user, onNavigate }: { requests
                     <div className="grid gap-6">
                         {req.quotes?.map(quote => (
                         <div key={quote.id} className={`bg-white p-6 rounded-[40px] border-4 shadow-xl relative overflow-hidden transition-all ${quote.status === 'ACCEPTED' ? 'border-emerald-500' : 'border-white'} ${quote.status === 'REJECTED' ? 'opacity-40 grayscale' : ''}`}>
-                            {quote.status === 'ACCEPTED' && <div className="absolute top-0 right-0 bg-emerald-500 text-white text-[9px] px-6 py-2 rounded-bl-3xl font-black uppercase tracking-widest">Oferta Vencedora</div>}
-                            
                             <div className="flex flex-col sm:flex-row justify-between items-start gap-4 mb-6">
                                 <div className="flex items-center gap-3">
                                     <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center shadow-inner"><Store size={24}/></div>
                                     <div>
                                         <span className="font-black text-gray-800 text-base">{quote.pharmacyName}</span>
-                                        <p className="text-[10px] font-bold text-gray-400 uppercase">Há poucos minutos</p>
+                                        <p className="text-[10px] font-bold text-gray-400 uppercase">Proposta de Valor</p>
                                     </div>
                                 </div>
                                 {quote.status !== 'REJECTED' && <span className="text-2xl font-black text-emerald-600">Kz {quote.totalPrice.toLocaleString()}</span>}
@@ -524,17 +512,13 @@ export const PrescriptionsListView = ({ requests, user, onNavigate }: { requests
                                     <span className="text-emerald-600 font-black">{item.available ? `Kz ${item.price.toLocaleString()}` : 'Esgotado'}</span>
                                 </div>
                                 ))}
-                                <div className="flex justify-between text-[10px] text-blue-600 border-t border-gray-200 pt-4 mt-2 font-black uppercase tracking-widest">
-                                    <span>Taxa de Serviço</span>
-                                    <span>Kz {quote.deliveryFee.toLocaleString()}</span>
-                                </div>
                             </div>
                             
                             {req.status !== 'COMPLETED' && quote.status !== 'REJECTED' && (
                                 <div className="flex gap-4">
                                     <Button 
                                         onClick={() => handleAcceptQuote(quote)} 
-                                        className="flex-[4] py-5 rounded-[24px] font-black text-sm tracking-widest shadow-2xl shadow-emerald-200"
+                                        className="flex-[4] py-5 rounded-[24px] font-black text-sm tracking-widest shadow-2xl"
                                         disabled={!!processingQuoteId} 
                                     >
                                         {processingQuoteId === quote.id ? <Loader2 className="animate-spin" /> : "ACEITAR ORÇAMENTO"}

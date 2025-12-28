@@ -68,7 +68,7 @@ const ADMIN_MENU = [
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
-  const [showResetButton, setShowResetButton] = useState(false); // Botão de pânico se demorar
+  const [showResetButton, setShowResetButton] = useState(false);
   const [page, setPage] = useState('home'); 
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error' | 'info'} | null>(null);
 
@@ -99,7 +99,7 @@ const App: React.FC = () => {
     setPharmacyStatus(null);
     setCriticalAlert(null);
     isInitialLoadDone.current = false;
-}, []);
+  }, []);
 
   const handleLogout = useCallback(async () => { 
     await signOutUser(); 
@@ -110,9 +110,21 @@ const App: React.FC = () => {
   const loadData = useCallback(async (u: User, forceStatic = false) => {
       if (!u) return;
       try {
+          // Garante que a sessão esteja ativa antes de carregar
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) {
+              const { data: refreshed } = await supabase.auth.refreshSession();
+              if (!refreshed.session) {
+                  handleLogout();
+                  return;
+              }
+          }
+
           if (!isInitialLoadDone.current || forceStatic) {
-              const phData = await fetchPharmacies(u.role === UserRole.ADMIN);
-              const prDataFetched = u.role === UserRole.PHARMACY && u.pharmacyId ? await fetchProducts(u.pharmacyId) : await fetchProducts();
+              const [phData, prDataFetched] = await Promise.all([
+                  fetchPharmacies(u.role === UserRole.ADMIN),
+                  u.role === UserRole.PHARMACY && u.pharmacyId ? fetchProducts(u.pharmacyId) : fetchProducts()
+              ]);
               
               setPharmacies(phData || []);
               setProducts(prDataFetched || []);
@@ -160,9 +172,9 @@ const App: React.FC = () => {
               setOrders(allOrders || []);
           }
       } catch (err) { 
-          console.warn("Sync falhou, usando cache ou resetando estado."); 
+          console.warn("Sync falhou, tentando reconectar canal..."); 
       }
-  }, [products.length]);
+  }, [products.length, handleLogout]);
 
   const handleLogin = useCallback((u: User) => {
     setUser(u);
@@ -170,16 +182,25 @@ const App: React.FC = () => {
     loadData(u);
   }, [loadData]);
 
-  // MONITOR DE AUTENTICAÇÃO COM FAIL-SAFE MELHORADO
   useEffect(() => {
-    // Se após 4 segundos ainda estiver carregando, mostra opção de reset
     const timer = setTimeout(() => {
         if (authChecking) setShowResetButton(true);
     }, 4000);
 
-    // Listener global para logout forçado (vindo de erros 401/403)
     const handleForceLogout = () => handleLogout();
     window.addEventListener('force-logout', handleForceLogout);
+
+    // SOLUÇÃO DEFINITIVA: Reconectar ao voltar para a aba ou focar a janela
+    const handleReactivate = () => {
+        if (document.visibilityState === 'visible' && user) {
+            console.log("Aba reativada. Sincronizando banco de dados...");
+            loadData(user);
+            // Reinicia canais realtime que podem ter morrido
+            supabase.getChannels().forEach(ch => ch.unsubscribe().then(() => ch.subscribe()));
+        }
+    };
+    window.addEventListener('visibilitychange', handleReactivate);
+    window.addEventListener('focus', handleReactivate);
 
     const initAuth = async () => {
         try {
@@ -207,9 +228,11 @@ const App: React.FC = () => {
           const u = await getCurrentUser();
           if (u) handleLogin(u);
           setAuthChecking(false);
-      } else if (event === 'SIGNED_OUT') {
-          handleCleanup();
-          setAuthChecking(false);
+      } else if (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
+          if (event === 'SIGNED_OUT') {
+              handleCleanup();
+              setAuthChecking(false);
+          }
       }
     });
 
@@ -218,16 +241,21 @@ const App: React.FC = () => {
         subscription.unsubscribe();
         clearTimeout(timer);
         window.removeEventListener('force-logout', handleForceLogout);
+        window.removeEventListener('visibilitychange', handleReactivate);
+        window.removeEventListener('focus', handleReactivate);
     };
-  }, [handleLogin, handleLogout, handleCleanup, authChecking]);
+  }, [handleLogin, handleLogout, handleCleanup, authChecking, user, loadData]);
 
-  // Heartbeat para manter sessão viva
+  // HEARTBEAT AGRESSIVO (A cada 2 minutos para não deixar o Cloudflare/Browser matar a conexão)
   useEffect(() => {
       if (!user) return;
       const heartbeat = setInterval(async () => {
           const { error } = await supabase.auth.getSession();
-          if (error) handleLogout();
-      }, 5 * 60 * 1000); 
+          if (error) {
+              const { error: refreshError } = await supabase.auth.refreshSession();
+              if (refreshError) handleLogout();
+          }
+      }, 2 * 60 * 1000); 
       return () => clearInterval(heartbeat);
   }, [user, handleLogout]);
 
@@ -288,16 +316,16 @@ const App: React.FC = () => {
   if (authChecking) return (
     <div className="h-screen flex flex-col items-center justify-center bg-white p-6 text-center">
         <div className="w-12 h-12 border-4 border-emerald-100 border-t-emerald-600 rounded-full animate-spin"></div>
-        <p className="mt-4 text-xs font-black text-gray-400 uppercase tracking-widest animate-pulse">Sincronizando Rede...</p>
+        <p className="mt-4 text-xs font-black text-gray-400 uppercase tracking-widest animate-pulse">Estabelecendo Conexão Segura...</p>
         
         {showResetButton && (
             <div className="mt-12 animate-fade-in">
-                <p className="text-xs text-gray-400 mb-4 font-medium">Demorando muito? Pode ser um erro de cache.</p>
+                <p className="text-xs text-gray-400 mb-4 font-medium">O banco de dados demorou a responder.</p>
                 <button 
                     onClick={forceNuclearReset}
                     className="flex items-center gap-2 px-6 py-3 bg-gray-100 text-gray-600 rounded-2xl text-[10px] font-black uppercase hover:bg-emerald-50 hover:text-emerald-600 transition-all border border-gray-200"
                 >
-                    <RotateCcw size={14}/> Limpar Cache e Recarregar
+                    <RotateCcw size={14}/> Forçar Sincronização
                 </button>
             </div>
         )}

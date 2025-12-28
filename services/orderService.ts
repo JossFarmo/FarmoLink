@@ -16,7 +16,6 @@ const safeJsonParse = (data: any): any[] => {
 
 export const createOrder = async (order: Omit<Order, 'id' | 'date'>): Promise<{ success: boolean, error?: string }> => {
     return safeQuery(async () => {
-        // PROTEÇÃO EXTRA: Impede pedidos duplicados idênticos em menos de 45 segundos (Prevenção de clique duplo no servidor)
         const fortyFiveSecondsAgo = new Date(Date.now() - 45000).toISOString();
         const { data: duplicates } = await supabase
             .from('orders')
@@ -28,7 +27,7 @@ export const createOrder = async (order: Omit<Order, 'id' | 'date'>): Promise<{ 
             
         if (duplicates && duplicates.length > 0) {
             console.warn("Bloqueada tentativa de pedido duplicado.");
-            return { success: true }; // Retorna sucesso para o cliente não ver erro, mas não insere
+            return { success: true }; 
         }
 
         const { data: pharm } = await supabase.from('pharmacies').select('commission_rate').eq('id', order.pharmacyId).single();
@@ -52,16 +51,17 @@ export const fetchOrders = async (pharmacyId?: string): Promise<Order[]> => {
         return data;
     });
 
-    return (res || []).map((o: any) => ({
-        id: o.id, customerName: o.customer_name, customerPhone: o.customer_phone,
-        items: safeJsonParse(o.items), total: o.total, status: o.status as OrderStatus,
-        // Formatação explícita com Hora e Minuto
-        date: new Date(o.created_at).toLocaleString('pt-AO', { 
-            day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' 
-        }), 
-        type: o.type, pharmacyId: o.pharmacy_id,
-        address: o.address, commissionAmount: o.commission_amount
-    }));
+    return (res || []).map((o: any) => {
+        const d = new Date(o.created_at);
+        return {
+            id: o.id, customerName: o.customer_name, customerPhone: o.customer_phone,
+            items: safeJsonParse(o.items), total: o.total, status: o.status as OrderStatus,
+            // Formato amigável para o agrupador visual
+            date: d.toLocaleDateString('pt-AO') + ", " + d.toLocaleTimeString('pt-AO', { hour: '2-digit', minute: '2-digit' }), 
+            type: o.type, pharmacyId: o.pharmacy_id,
+            address: o.address, commissionAmount: o.commission_amount
+        }
+    });
 };
 
 export const updateOrderStatus = async (id: string, status: OrderStatus): Promise<boolean> => {
@@ -89,19 +89,20 @@ export const fetchPrescriptionRequests = async (role: UserRole, userId?: string,
         return data;
     });
 
-    return (data || []).map((r: any) => ({
-        id: r.id, customerId: r.customer_id, imageUrl: r.image_url,
-        date: new Date(r.created_at).toLocaleString('pt-AO', { 
-            day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' 
-        }),
-        status: r.status,
-        targetPharmacies: safeJsonParse(r.target_pharmacies), notes: r.notes,
-        quotes: (r.quotes || []).map((q: any) => ({
-            id: q.id, prescriptionId: q.prescription_id, pharmacyId: q.pharmacy_id, pharmacyName: q.pharmacy_name,
-            items: safeJsonParse(q.items), totalPrice: q.total, deliveryFee: q.delivery_fee, status: q.status,
-            notes: q.notes, rejectionReason: q.rejection_reason, createdAt: q.created_at
-        }))
-    }));
+    return (data || []).map((r: any) => {
+        const d = new Date(r.created_at);
+        return {
+            id: r.id, customerId: r.customer_id, imageUrl: r.image_url,
+            date: d.toLocaleDateString('pt-AO') + ", " + d.toLocaleTimeString('pt-AO', { hour: '2-digit', minute: '2-digit' }),
+            status: r.status,
+            targetPharmacies: safeJsonParse(r.target_pharmacies), notes: r.notes,
+            quotes: (r.quotes || []).map((q: any) => ({
+                id: q.id, prescriptionId: q.prescription_id, pharmacyId: q.pharmacy_id, pharmacyName: q.pharmacy_name,
+                items: safeJsonParse(q.items), totalPrice: q.total, deliveryFee: q.delivery_fee, status: q.status,
+                notes: q.notes, rejectionReason: q.rejection_reason, createdAt: q.created_at
+            }))
+        }
+    });
 };
 
 export const sendPrescriptionQuote = async (requestId: string, pharmacyId: string, pharmacyName: string, items: QuotedItem[], deliveryFee: number, notes?: string): Promise<boolean> => {

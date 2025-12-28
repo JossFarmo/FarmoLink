@@ -19,24 +19,29 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
 
 /**
  * Utilitário de resiliência: Tenta executar uma função e repete se houver erro de rede.
- * Se detectar erro de autenticação (401/403), força o logout do sistema.
+ * Se detectar erro de autenticação, tenta forçar um refresh antes de falhar.
  */
 export const safeQuery = async <T>(fn: () => Promise<T>, retries = 1): Promise<T | null> => {
     try {
         const result = await fn();
-        // Verifica se o resultado é um objeto de erro do Supabase
+        
+        // Verificação de erro de autenticação no padrão do Supabase
         if ((result as any)?.error) {
             const error = (result as any).error;
-            if (error.status === 401 || error.status === 403 || error.message?.includes('JWT')) {
-                console.error("Sessão inválida detectada via SafeQuery.");
+            if (error.status === 401 || error.status === 403) {
+                console.warn("Sessão possivelmente expirada. Tentando recuperar...");
+                const { data } = await supabase.auth.refreshSession();
+                if (data?.session && retries > 0) {
+                    return safeQuery(fn, retries - 1);
+                }
                 window.dispatchEvent(new CustomEvent('force-logout'));
                 return null;
             }
         }
         return result;
     } catch (err: any) {
-        if (retries > 0) {
-            await new Promise(res => setTimeout(res, 800));
+        if (retries > 0 && (err.message?.includes('fetch') || err.message?.includes('JWT'))) {
+            await new Promise(res => setTimeout(res, 1000));
             return safeQuery(fn, retries - 1);
         }
         console.error("Erro persistente na query:", err);

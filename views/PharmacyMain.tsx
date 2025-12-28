@@ -24,7 +24,7 @@ export const PharmacyUrgentAlert = ({ alert, onResolve }: { alert: {type: 'ORDER
                         <h4 className="text-xl font-black uppercase tracking-tighter">Ação Necessária Urgente!</h4>
                         <p className="text-sm font-bold opacity-90">
                             {alert.type === 'ORDER' 
-                                ? `Você tem ${alert.count} pedido(s) pendente(s) aguardando aceite.` 
+                                ? `Você tem ${alert.count} pedido(s) pendente(s).` 
                                 : `Chegou uma nova receita médica para cotação.`}
                         </p>
                     </div>
@@ -75,7 +75,6 @@ export const PharmacyOverview = ({ stats, pharmacyId, isAvailable, onRefresh, se
 
         if (success) {
             playSound(newFee > 0 ? 'success' : 'click');
-            // Recarrega dados locais
             const updated = await fetchPharmacyById(pharmacyId);
             setPharmacyData(updated);
         }
@@ -89,24 +88,22 @@ export const PharmacyOverview = ({ stats, pharmacyId, isAvailable, onRefresh, se
             <div className="bg-white p-6 rounded-3xl shadow-sm border flex flex-col md:flex-row justify-between items-center gap-4">
                 <div className="flex-1">
                     <h1 className="text-xl font-black text-gray-800 uppercase tracking-tight">Status da Loja</h1>
-                    <p className="text-xs text-gray-400">{isAvailable ? 'Sua farmácia está visível para os clientes.' : 'Sua loja está fechada e oculta no shopping.'}</p>
+                    <p className="text-xs text-gray-400">{isAvailable ? 'Loja aberta e visível.' : 'Loja fechada temporariamente.'}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-4 bg-gray-50 p-3 rounded-2xl border">
-                    {/* TOGGLE VISIBILIDADE */}
                     <div className="flex items-center gap-3 pr-4 border-r">
-                        <Badge color={isAvailable ? 'green' : 'red'}>{isAvailable ? 'LOJA ONLINE' : 'LOJA FECHADA'}</Badge>
-                        <button onClick={handleToggleVisibility} disabled={toggling} className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${isAvailable ? 'bg-emerald-600 shadow-inner' : 'bg-gray-200'}`}>
+                        <Badge color={isAvailable ? 'green' : 'red'}>{isAvailable ? 'ONLINE' : 'OFFLINE'}</Badge>
+                        <button onClick={handleToggleVisibility} disabled={toggling} className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${isAvailable ? 'bg-emerald-600' : 'bg-gray-200'}`}>
                             <span className={`inline-block h-6 w-6 transform rounded-full bg-white shadow-md transition-transform ml-1 ${isAvailable ? 'translate-x-6' : ''}`} />
                         </button>
                     </div>
 
-                    {/* TOGGLE ENTREGA (NOVO/RESTAURO) */}
                     <div className="flex items-center gap-3">
-                        <Badge color={deliveryActive ? 'blue' : 'gray'}>{deliveryActive ? 'ENTREGA ATIVA' : 'SEM ENTREGA'}</Badge>
+                        <Badge color={deliveryActive ? 'blue' : 'gray'}>DELIVERY</Badge>
                         <button 
                             onClick={handleToggleDelivery} 
                             disabled={deliveryToggling} 
-                            className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${deliveryActive ? 'bg-blue-600 shadow-inner' : 'bg-gray-200'}`}
+                            className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${deliveryActive ? 'bg-blue-600' : 'bg-gray-200'}`}
                         >
                             {deliveryToggling ? (
                                 <Loader2 className="animate-spin text-white mx-auto" size={14} />
@@ -124,15 +121,15 @@ export const PharmacyOverview = ({ stats, pharmacyId, isAvailable, onRefresh, se
                     <h3 className="text-4xl font-black text-gray-800">{stats?.pendingOrders || 0}</h3>
                 </Card>
                 <Card className="p-6 border-l-4 border-emerald-500 cursor-pointer hover:shadow-lg transition-all" onClick={() => setView('financial')}>
-                    <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest mb-1">Receita do Dia</p>
+                    <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest mb-1">Faturamento Hoje</p>
                     <h3 className="text-3xl font-black text-emerald-600">Kz {stats?.revenue?.toLocaleString()}</h3>
                 </Card>
                 <Card className="p-6 border-l-4 border-orange-500 cursor-pointer hover:shadow-lg transition-all" onClick={() => setView('products')}>
-                    <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest mb-1">Stock de Produtos</p>
+                    <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest mb-1">Stock</p>
                     <h3 className="text-4xl font-black text-gray-800">{stats?.productsCount || 0}</h3>
                 </Card>
                 <Card className="p-6 border-l-4 border-purple-500">
-                    <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest mb-1">Avaliação Média</p>
+                    <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest mb-1">Feedback</p>
                     <h3 className="text-4xl font-black text-gray-800 flex items-center gap-2">5.0 <Star className="fill-purple-500 text-purple-500" size={24}/></h3>
                 </Card>
             </div>
@@ -148,7 +145,8 @@ export const PharmacyOrdersModule = ({ pharmacyId, onUpdate }: { pharmacyId: str
 
     const load = async () => { 
         setLoading(true); 
-        setOrders(await fetchOrders(pharmacyId)); 
+        const data = await fetchOrders(pharmacyId);
+        setOrders(data); 
         setLoading(false); 
     };
 
@@ -165,14 +163,14 @@ export const PharmacyOrdersModule = ({ pharmacyId, onUpdate }: { pharmacyId: str
     const getActionConfig = (status: OrderStatus, type: 'DELIVERY' | 'PICKUP') => {
         switch(status) {
             case OrderStatus.PENDING: 
-                return { label: 'Aceitar Pedido', next: OrderStatus.PREPARING, color: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200', icon: <CheckCircle2 size={16}/> };
+                return { label: 'Aceitar', next: OrderStatus.PREPARING, color: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200', icon: <CheckCircle2 size={16}/> };
             case OrderStatus.PREPARING: 
                 const nextS = type === 'DELIVERY' ? OrderStatus.OUT_FOR_DELIVERY : OrderStatus.READY_FOR_PICKUP;
-                const label = type === 'DELIVERY' ? 'Enviar p/ Entrega' : 'Pronto p/ Levantamento';
+                const label = type === 'DELIVERY' ? 'Despachar' : 'Finalizar Prep.';
                 return { label: label, next: nextS, color: 'bg-blue-100 text-blue-700 hover:bg-blue-200', icon: <Truck size={16}/> };
             case OrderStatus.OUT_FOR_DELIVERY:
             case OrderStatus.READY_FOR_PICKUP: 
-                return { label: 'Finalizar Pedido', next: OrderStatus.COMPLETED, color: 'bg-emerald-600 text-white hover:bg-emerald-700', icon: <CheckCircle2 size={16}/> };
+                return { label: 'Entregue', next: OrderStatus.COMPLETED, color: 'bg-emerald-600 text-white hover:bg-emerald-700', icon: <CheckCircle2 size={16}/> };
             default: return null;
         }
     };
@@ -189,7 +187,7 @@ export const PharmacyOrdersModule = ({ pharmacyId, onUpdate }: { pharmacyId: str
         <div className="space-y-6 animate-fade-in pb-20">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                    <h2 className="text-3xl font-black text-gray-800">Gerenciar Pedidos</h2>
+                    <h2 className="text-3xl font-black text-gray-800">Operações</h2>
                     <div className="flex items-center gap-3 mt-1">
                         <button 
                             onClick={() => setShowHistory(false)}
@@ -211,15 +209,15 @@ export const PharmacyOrdersModule = ({ pharmacyId, onUpdate }: { pharmacyId: str
                     <div className="bg-white border rounded-2xl px-4 py-2.5 flex items-center gap-3 flex-1 md:w-64 shadow-sm">
                         <Search size={18} className="text-gray-300"/>
                         <input 
-                            placeholder="Buscar cliente ou ID..." 
+                            placeholder="Buscar..." 
                             className="bg-transparent outline-none text-sm w-full font-bold text-gray-700" 
                             value={searchTerm} 
                             onChange={e => setSearchTerm(e.target.value)}
                         />
                     </div>
-                    <div className="flex items-center gap-2 text-[10px] font-black text-gray-400 animate-pulse">
-                        <RefreshCw size={12} className={loading ? 'animate-spin' : ''}/> {loading ? 'Sincronizando...' : 'Atualizado'}
-                    </div>
+                    <button onClick={load} className="p-3 bg-white border rounded-2xl hover:bg-gray-100">
+                        <RefreshCw size={16} className={loading ? 'animate-spin' : ''}/>
+                    </button>
                 </div>
             </div>
 
@@ -229,7 +227,7 @@ export const PharmacyOrdersModule = ({ pharmacyId, onUpdate }: { pharmacyId: str
                         <tr className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
                             <th className="p-6">ID / Hora</th>
                             <th className="p-6">Cliente</th>
-                            <th className="p-6">Total</th>
+                            <th className="p-6">Fatura</th>
                             <th className="p-6">Status</th>
                             <th className="p-6 text-right">Ação</th>
                         </tr>
@@ -240,7 +238,7 @@ export const PharmacyOrdersModule = ({ pharmacyId, onUpdate }: { pharmacyId: str
                                 <td colSpan={5} className="p-20 text-center">
                                     <div className="flex flex-col items-center opacity-20">
                                         <Package size={64}/>
-                                        <p className="mt-4 font-black text-sm uppercase">Nenhum pedido encontrado</p>
+                                        <p className="mt-4 font-black text-sm uppercase">Lista Vazia</p>
                                     </div>
                                 </td>
                             </tr>
@@ -248,7 +246,7 @@ export const PharmacyOrdersModule = ({ pharmacyId, onUpdate }: { pharmacyId: str
                             filteredOrders.map((o, idx) => {
                                 const action = getActionConfig(o.status, o.type);
                                 
-                                // Lógica de separação por dia para o histórico da farmácia
+                                // Agrupamento visual por dia
                                 const currentDateStr = o.date.split(',')[0].trim();
                                 const prevOrder = filteredOrders[idx - 1];
                                 const prevDateStr = prevOrder ? prevOrder.date.split(',')[0].trim() : null;
@@ -275,27 +273,10 @@ export const PharmacyOrdersModule = ({ pharmacyId, onUpdate }: { pharmacyId: str
                                                 <p className="text-xs font-bold text-gray-800 mt-1 flex items-center gap-1">
                                                     <Clock size={12} className="text-emerald-500"/> {o.date.split(',')[1]?.trim() || o.date}
                                                 </p>
-                                                <p className="text-[9px] font-bold text-gray-400 uppercase mt-1">
-                                                    {o.type === 'DELIVERY' ? 'ENTREGA' : 'RETIRADA'}
-                                                </p>
                                             </td>
                                             <td className="p-6">
-                                                <p className="font-black text-gray-800 text-sm mb-2">{o.customerName}</p>
-                                                <div className="flex gap-2">
-                                                    <a 
-                                                        href={`tel:${o.customerPhone}`} 
-                                                        className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-600 rounded-lg text-[9px] font-black uppercase hover:bg-emerald-600 hover:text-white transition-all"
-                                                    >
-                                                        <Phone size={10}/> Ligar
-                                                    </a>
-                                                    <a 
-                                                        href={`https://wa.me/${o.customerPhone?.replace(/\D/g,'')}`} 
-                                                        target="_blank" 
-                                                        className="flex items-center gap-1.5 px-3 py-1 bg-green-50 text-green-600 rounded-lg text-[9px] font-black uppercase hover:bg-green-600 hover:text-white transition-all"
-                                                    >
-                                                        <MessageCircle size={10}/> WhatsApp
-                                                    </a>
-                                                </div>
+                                                <p className="font-black text-gray-800 text-sm mb-1">{o.customerName}</p>
+                                                <p className="text-[10px] text-gray-400 font-bold uppercase">{o.type === 'DELIVERY' ? 'ENTREGA' : 'LEVANTAMENTO'}</p>
                                             </td>
                                             <td className="p-6">
                                                 <span className="font-black text-gray-700 text-sm">Kz {o.total.toLocaleString()}</span>
@@ -323,7 +304,7 @@ export const PharmacyOrdersModule = ({ pharmacyId, onUpdate }: { pharmacyId: str
                                                                 <button 
                                                                     onClick={() => handleAction(o.id, OrderStatus.REJECTED)}
                                                                     className="p-2.5 bg-red-50 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all"
-                                                                    title="Recusar Pedido"
+                                                                    title="Recusar"
                                                                 >
                                                                     <XCircle size={18}/>
                                                                 </button>
