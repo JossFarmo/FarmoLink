@@ -126,6 +126,27 @@ site:
 farmolink.vercel.app
 
 
+--
+
+lojas de referência: 
+UberEats, iFood e Glovo
+
+--
+
+Re-compra Rápida: Na Home do cliente:
+Facilitar a vida de quem usa medicamentos de uso contínuo (Ex: Hipertensão ou Diabetes).
+
+se ele já tiver um pedido concluído, aparece um card elegante sugerindo "Comprar novamente". 
+Isso economiza tempo e aumenta as vendas recorrentes para as farmácias.
+
+
+Farmobot:
+O usuário poderá perguntar coisas como: "Estou com azia, o que a Farmácia X tem disponível?" 
+ou "Para que serve o Ibuprofeno?".
+FarmoBot IA (Gemini): Agora existe um cérebro dentro do app. O usuário pode tirar dúvidas sobre medicamentos e o 
+robô responde citando os preços reais do stock da plataforma. Isso gera um valor imenso de utilidade.
+
+
 
 
 

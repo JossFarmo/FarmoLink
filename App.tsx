@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MainLayout } from './components/Layout';
 import { AuthView, UpdatePasswordView } from './components/Auth';
 import { LandingPage } from './components/LandingPage';
-import { Toast, LoadingOverlay } from './components/UI';
+import { Toast, LoadingOverlay, Button } from './components/UI';
 import { supabase } from './services/supabaseClient';
 
 // Views
@@ -30,7 +30,7 @@ import {
     fetchPharmacyById, getCacheForUser, setCacheForUser 
 } from './services/dataService';
 import { playSound } from './services/soundService';
-import { Home, Store, FileText, ShoppingBag, User as UserIcon, HelpCircle, BarChart3, Package, DollarSign, Settings, Activity, Users, Database, ShieldCheck, Megaphone, Star, ImageIcon, Loader2, RotateCcw } from 'lucide-react';
+import { Home, Store, FileText, ShoppingBag, User as UserIcon, HelpCircle, BarChart3, Package, DollarSign, Settings, Activity, Users, Database, ShieldCheck, Megaphone, Star, ImageIcon, Loader2, RotateCcw, AlertTriangle, X } from 'lucide-react';
 
 const CUSTOMER_MENU = [
     { id: 'home', label: 'Shopping', icon: Home },
@@ -71,7 +71,6 @@ const App: React.FC = () => {
   const [globalLoading, setGlobalLoading] = useState(false);
   const [showResetButton, setShowResetButton] = useState(false);
   
-  // Persistência de Navegação: Recupera a última página acessada
   const [page, setPage] = useState(() => sessionStorage.getItem('last_page') || 'home'); 
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error' | 'info'} | null>(null);
 
@@ -81,6 +80,8 @@ const App: React.FC = () => {
   const [prescriptions, setPrescriptions] = useState<PrescriptionRequest[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
   
+  const [cartConflict, setCartConflict] = useState<{ newItem: Product, currentPharmacyName: string } | null>(null);
+
   const [pharmacyStats, setPharmacyStats] = useState<DashboardStats>({ totalOrders: 0, revenue: 0, pendingOrders: 0, productsCount: 0 });
   const [pharmacyStatus, setPharmacyStatus] = useState<string | null>(null);
   const [pharmacyIsAvailable, setPharmacyIsAvailable] = useState(false);
@@ -91,7 +92,6 @@ const App: React.FC = () => {
   const lastRxCountRef = useRef(0);
   const isInitialLoadDone = useRef(false);
 
-  // Efeito para salvar a página atual na sessão
   useEffect(() => {
     if (user) sessionStorage.setItem('last_page', page);
   }, [page, user]);
@@ -173,13 +173,12 @@ const App: React.FC = () => {
               setOrders(allOrders || []);
           }
       } catch (err) { 
-          console.warn("Sincronização silenciosa interrompida."); 
+          console.warn("Sync silencioso interrompido."); 
       }
   }, [products.length]);
 
   const handleLogin = useCallback((u: User, isFirstLoad: boolean = false) => {
     setUser(u);
-    // Só redireciona se for o login "frio" e não houver página salva na sessão
     if (isFirstLoad && !sessionStorage.getItem('last_page')) {
         const defaultPage = u.role === UserRole.CUSTOMER ? 'home' : (u.role === UserRole.PHARMACY ? 'dashboard' : 'overview');
         setPage(defaultPage);
@@ -232,7 +231,6 @@ const App: React.FC = () => {
     };
   }, [handleLogin, handleLogout, handleCleanup]);
 
-  // Sincronização de Foco (Pilar de confiança do Admin e Farmácia)
   useEffect(() => {
     if (!user) return;
     const handleReactivate = () => {
@@ -246,6 +244,13 @@ const App: React.FC = () => {
   }, [user, loadData]);
 
   const handleAddToCart = (product: Product) => {
+      if (cart.length > 0 && cart[0].pharmacyId !== product.pharmacyId) {
+          const currentPharmacy = pharmacies.find(p => p.id === cart[0].pharmacyId);
+          setCartConflict({ newItem: product, currentPharmacyName: currentPharmacy?.name || 'outra farmácia' });
+          playSound('error');
+          return;
+      }
+
       setCart(prev => {
           const existing = prev.find(item => item.id === product.id);
           if (existing) {
@@ -258,6 +263,14 @@ const App: React.FC = () => {
           playSound('click');
           return [...prev, { ...product, quantity: 1 }];
       });
+  };
+
+  const confirmClearAndAdd = () => {
+      if (cartConflict) {
+          setCart([{ ...cartConflict.newItem, quantity: 1 }]);
+          setCartConflict(null);
+          playSound('success');
+      }
   };
 
   const handleCheckout = async (type: 'DELIVERY' | 'PICKUP', address: string, total: number) => {
@@ -280,6 +293,7 @@ const App: React.FC = () => {
           setPage('orders');
           playSound('success');
           setToast({ msg: "Pedido realizado com sucesso!", type: 'success' });
+          loadData(user); // Refresh orders
       } else {
           setToast({ msg: res.error || "Erro ao finalizar pedido.", type: 'error' });
       }
@@ -303,6 +317,26 @@ const App: React.FC = () => {
     <MainLayout user={user} activePage={page} onNavigate={setPage} onLogout={handleLogout} menuItems={user.role === UserRole.CUSTOMER ? CUSTOMER_MENU : (user.role === UserRole.PHARMACY ? PHARMACY_MENU : ADMIN_MENU)} cartCount={cart.reduce((acc, item) => acc + item.quantity, 0)}>
         {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
         {globalLoading && <LoadingOverlay />}
+
+        {cartConflict && (
+            <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-emerald-950/80 backdrop-blur-md p-4 animate-fade-in">
+                <div className="bg-white rounded-[40px] p-10 max-w-md w-full shadow-2xl animate-scale-in text-center border-none">
+                    <div className="w-20 h-20 bg-orange-100 text-orange-600 rounded-[32px] flex items-center justify-center mx-auto mb-6">
+                        <AlertTriangle size={40}/>
+                    </div>
+                    <h3 className="text-2xl font-black text-gray-800 mb-4 uppercase tracking-tighter">Trocar de Farmácia?</h3>
+                    <p className="text-gray-500 text-sm leading-relaxed mb-8 font-medium">
+                        Seu carrinho já contém itens da <span className="font-black text-emerald-600">{cartConflict.currentPharmacyName}</span>. 
+                    </p>
+                    <div className="flex flex-col gap-3">
+                        <Button onClick={confirmClearAndAdd} className="w-full py-5 bg-emerald-600 hover:bg-emerald-700 font-black text-base rounded-3xl shadow-xl shadow-emerald-100">
+                            ESVAZIAR E ADICIONAR
+                        </Button>
+                        <button onClick={() => setCartConflict(null)} className="w-full py-4 text-gray-400 font-black uppercase text-xs tracking-widest hover:text-gray-600 transition-colors">Manter itens atuais</button>
+                    </div>
+                </div>
+            </div>
+        )}
         
         {user.role === UserRole.PHARMACY ? (
             pharmacyStatus === 'PENDING' ? <PharmacyPendingView user={user} onCheckAgain={() => loadData(user)} onLogout={handleLogout} /> :
@@ -341,16 +375,16 @@ const App: React.FC = () => {
         ) : (
             (() => {
                 switch (page) {
-                    case 'home': return <HomeView products={products} pharmacies={pharmacies} onAddToCart={handleAddToCart} onNavigate={setPage} onViewPharmacy={(id:any)=>{setSelectedPharmacyId(id); setPage('pharmacy-details')}} />;
+                    case 'home': return <HomeView products={products} pharmacies={pharmacies} onAddToCart={handleAddToCart} onNavigate={setPage} onViewPharmacy={(id:any)=>{setSelectedPharmacyId(id); setPage('pharmacy-details')}} cartPharmacyId={cart.length > 0 ? cart[0].pharmacyId : null} orders={orders} />;
                     case 'pharmacies-list': return <AllPharmaciesView pharmacies={pharmacies} onViewPharmacy={(id:any)=>{setSelectedPharmacyId(id); setPage('pharmacy-details')}} />;
-                    case 'pharmacy-details': return <PharmacyDetailsView pharmacy={pharmacies.find(p=>p.id===selectedPharmacyId)} products={products.filter(p=>p.pharmacyId===selectedPharmacyId)} onAddToCart={handleAddToCart} onBack={()=>setPage('home')} />;
+                    case 'pharmacy-details': return <PharmacyDetailsView pharmacy={pharmacies.find(p=>p.id===selectedPharmacyId)} products={products.filter(p=>p.pharmacyId===selectedPharmacyId)} onAddToCart={handleAddToCart} onBack={()=>setPage('home')} cartPharmacyId={cart.length > 0 ? cart[0].pharmacyId : null} />;
                     case 'cart': return <CartView items={cart} pharmacies={pharmacies} updateQuantity={(id:any,d:any)=>setCart(cart.map(i=>i.id===id?{...i,quantity:i.quantity+d}:i).filter(i=>i.quantity>0))} onCheckout={handleCheckout} userAddress={user.address} onBack={()=>setPage('home')} />;
                     case 'orders': return <CustomerOrdersView orders={orders} pharmacies={pharmacies} onRefresh={()=>loadData(user)} />;
                     case 'prescriptions': return <PrescriptionsListView requests={prescriptions} user={user} onNavigate={setPage} />;
                     case 'upload-rx': return <PrescriptionUploadView pharmacies={pharmacies} user={user} onNavigate={setPage} />;
                     case 'profile': return <CustomerProfileView user={user} onUpdateUser={setUser} />;
                     case 'support': return <SupportView user={user} />;
-                    default: return <HomeView products={products} pharmacies={pharmacies} onAddToCart={handleAddToCart} onNavigate={setPage} onViewPharmacy={(id:any)=>{setSelectedPharmacyId(id); setPage('pharmacy-details')}} />;
+                    default: return <HomeView products={products} pharmacies={pharmacies} onAddToCart={handleAddToCart} onNavigate={setPage} onViewPharmacy={(id:any)=>{setSelectedPharmacyId(id); setPage('pharmacy-details')}} orders={orders} />;
                 }
             })()
         )}
