@@ -1,34 +1,22 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Search, MapPin, Plus, Store, Upload, Star, ArrowLeft, Pill, ChevronRight, Bike, Clock, ShoppingBag, X, Loader2, AlertCircle, AlertTriangle, FileText, MessageCircle, Send, Sparkles, CheckCircle, DollarSign, Wallet } from 'lucide-react';
+import { Search, MapPin, Plus, Store, Upload, Star, ArrowLeft, Pill, ChevronRight, Bike, Clock, ShoppingBag, X, Loader2, AlertCircle, AlertTriangle, FileText, MessageCircle, Send, Sparkles, CheckCircle, Wallet, Trash2 } from 'lucide-react';
 import { Product, Pharmacy, PRODUCT_CATEGORIES, Order } from '../types';
-import { Button, Badge, Card } from '../components/UI';
+import { Button, Card } from '../components/UI';
 import { playSound } from '../services/soundService';
 import { formatProductNameForCustomer } from '../services/geminiService';
-import { GoogleGenAI } from "@google/genai";
 
 const normalizeText = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
 export const HomeView = ({ products, pharmacies, onAddToCart, onNavigate, onViewPharmacy, cartPharmacyId, orders = [] }: any) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeCategory, setActiveCategory] = useState('Todos');
-  const [showSuggestions, setShowSuggestions] = useState(false);
   const [showAI, setShowAI] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
 
   const lastOrder = useMemo(() => {
     return [...orders].filter((o: Order) => o.status === 'Concluído').sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
   }, [orders]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
-        setShowSuggestions(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   const filteredProducts = useMemo(() => {
     return products.filter((p: Product) => {
@@ -86,15 +74,6 @@ export const HomeView = ({ products, pharmacies, onAddToCart, onNavigate, onView
           </div>
       )}
 
-      {cartPharmacyId && (
-          <div className="bg-orange-50 border-2 border-orange-100 p-4 rounded-3xl flex items-center gap-4 text-orange-800 animate-slide-in-top">
-              <AlertCircle className="shrink-0" size={24}/>
-              <p className="text-xs font-bold leading-tight">
-                  Carrinho Ativo: Você está comprando na <span className="font-black uppercase">{pharmacies.find((p:any)=>p.id===cartPharmacyId)?.name}</span>.
-              </p>
-          </div>
-      )}
-
       <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
           {['Todos', ...PRODUCT_CATEGORIES.slice(0, 10)].map(c => (
               <button key={c} onClick={() => setActiveCategory(c)} className={`px-5 py-2.5 rounded-full text-xs font-bold transition-all whitespace-nowrap ${activeCategory === c ? 'bg-emerald-600 text-white shadow-md' : 'bg-white border text-gray-400 hover:border-emerald-300'}`}>{c}</button>
@@ -102,17 +81,14 @@ export const HomeView = ({ products, pharmacies, onAddToCart, onNavigate, onView
       </div>
 
       <div className="space-y-4">
-          <div ref={searchRef} className="relative z-[60]">
-            <div className="bg-white p-2 rounded-2xl border shadow-sm flex items-center gap-3">
-                <Search className="text-gray-300 ml-4" size={20}/>
-                <input 
-                    placeholder="O que você precisa hoje?" 
-                    className="w-full py-4 outline-none font-bold text-gray-700" 
-                    value={searchTerm} 
-                    onFocus={() => setShowSuggestions(true)}
-                    onChange={e => { setSearchTerm(e.target.value); setShowSuggestions(true); }}
-                />
-            </div>
+          <div className="bg-white p-2 rounded-2xl border shadow-sm flex items-center gap-3">
+              <Search className="text-gray-300 ml-4" size={20}/>
+              <input 
+                  placeholder="O que você precisa hoje?" 
+                  className="w-full py-4 outline-none font-bold text-gray-700" 
+                  value={searchTerm} 
+                  onChange={e => setSearchTerm(e.target.value)}
+              />
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
@@ -143,7 +119,7 @@ export const HomeView = ({ products, pharmacies, onAddToCart, onNavigate, onView
   );
 };
 
-// --- COMPONENTE ASSISTENTE IA (CORRIGIDO) ---
+// --- COMPONENTE ASSISTENTE IA (UI CORRIGIDA) ---
 const HealthAssistantModal = ({ onClose, products }: { onClose: () => void, products: Product[] }) => {
     const [msg, setMsg] = useState('');
     const [chat, setChat] = useState<{role: 'ai' | 'user', text: string}[]>(() => {
@@ -153,12 +129,11 @@ const HealthAssistantModal = ({ onClose, products }: { onClose: () => void, prod
     const [loading, setLoading] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
 
-    // Auto-scroll ao final das mensagens
+    // Efeito para manter o scroll no fundo e salvar histórico
     useEffect(() => {
         if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
-        // Persistência local
         sessionStorage.setItem('farmobot_history', JSON.stringify(chat));
     }, [chat, loading]);
 
@@ -170,33 +145,35 @@ const HealthAssistantModal = ({ onClose, products }: { onClose: () => void, prod
         setLoading(true);
 
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const stockContext = products.slice(0, 40).map(p => `${p.name} (Kz ${p.price})`).join(', ');
-            
-            const response = await ai.models.generateContent({
-                model: 'gemini-3-flash-preview',
-                contents: `Você é o FarmoBot, assistente oficial da plataforma FarmoLink em Angola. 
-                Sua missão é ajudar pacientes a encontrarem remédios e tirarem dúvidas rápidas sobre saúde.
-                Stock atual na plataforma: ${stockContext}.
-                Use termos comuns em Angola (Kwanza, Províncias, etc).
-                IMPORTANTE: Sempre termine lembrando que você é uma IA e não substitui uma consulta médica presencial.
-                Pergunta do Usuário: ${userMsg}`,
+            const res = await fetch('/api/genai', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: userMsg, products: products.slice(0, 40) }),
             });
-
-            setChat(prev => [...prev, {role: 'ai', text: response.text || "Lamento, não consegui processar essa informação agora."}]);
+            const data = await res.json();
+            setChat(prev => [...prev, {role: 'ai', text: data?.text || "Lamento, tive uma falha de conexão. Verifique sua rede e tente novamente."}]);
         } catch (e) {
-            setChat(prev => [...prev, {role: 'ai', text: "Ocorreu um erro na rede. Por favor, tente novamente em instantes."}]);
+            setChat(prev => [...prev, {role: 'ai', text: "Lamento, tive uma falha de conexão. Verifique sua rede e tente novamente."}]);
         } finally {
             setLoading(false);
         }
     };
 
+    const clearChat = () => {
+        if(confirm("Deseja apagar o histórico desta conversa?")) {
+            setChat([]);
+            sessionStorage.removeItem('farmobot_history');
+            playSound('click');
+        }
+    };
+
     return (
         <div className="fixed inset-0 z-[200] bg-emerald-950/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
-            <div className="bg-white w-full max-w-lg h-full sm:h-[80vh] flex flex-col sm:rounded-[40px] shadow-2xl overflow-hidden border-none animate-scale-in">
+            {/* Modal Container - Altura controlada para não vazar */}
+            <div className="bg-white w-full max-w-lg h-[100dvh] sm:h-[80vh] flex flex-col sm:rounded-[40px] shadow-2xl overflow-hidden border-none animate-scale-in">
                 
-                {/* HEADER - FIXO */}
-                <div className="flex-shrink-0 p-6 bg-emerald-600 text-white flex justify-between items-center shadow-lg relative z-10">
+                {/* CABEÇALHO - FIXO (Nunca some) */}
+                <div className="flex-shrink-0 p-6 bg-emerald-600 text-white flex justify-between items-center shadow-lg relative z-[210]">
                     <div className="flex items-center gap-3">
                         <div className="p-2 bg-white/20 rounded-xl shadow-inner"><Sparkles size={20}/></div>
                         <div>
@@ -204,21 +181,28 @@ const HealthAssistantModal = ({ onClose, products }: { onClose: () => void, prod
                             <p className="text-[10px] opacity-80 font-bold mt-1 uppercase">Assistente FarmoLink</p>
                         </div>
                     </div>
-                    <button 
-                        onClick={onClose} 
-                        className="p-3 bg-white/10 hover:bg-white/30 rounded-full transition-all active:scale-90"
-                    >
-                        <X size={24}/>
-                    </button>
+                    <div className="flex items-center gap-2">
+                        {chat.length > 0 && (
+                            <button onClick={clearChat} className="p-3 hover:bg-white/20 rounded-full transition-colors text-emerald-200" title="Limpar conversa">
+                                <Trash2 size={20}/>
+                            </button>
+                        )}
+                        <button 
+                            onClick={onClose} 
+                            className="p-3 bg-white/10 hover:bg-white/30 rounded-full transition-all active:scale-90"
+                        >
+                            <X size={24}/>
+                        </button>
+                    </div>
                 </div>
 
-                {/* AREA DE MENSAGENS - SCROLLÁVEL */}
+                {/* AREA DE MENSAGENS - SCROLLÁVEL (Ocupa o espaço central) */}
                 <div 
                     ref={scrollRef}
-                    className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50 custom-scrollbar"
+                    className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50 custom-scrollbar relative"
                 >
                     {chat.length === 0 && (
-                        <div className="text-center py-12 flex flex-col items-center">
+                        <div className="text-center py-12 flex flex-col items-center justify-center h-full">
                             <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-[32px] flex items-center justify-center mb-4 animate-pulse">
                                 <MessageCircle size={40}/>
                             </div>
@@ -228,25 +212,19 @@ const HealthAssistantModal = ({ onClose, products }: { onClose: () => void, prod
                     )}
                     
                     {chat.map((c, i) => (
-                        <div key={i} className={`flex ${c.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                        <div key={i} className={`flex ${c.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}>
                             <div className={`max-w-[85%] p-4 rounded-3xl text-sm font-medium leading-relaxed shadow-sm ${
                                 c.role === 'user' 
                                 ? 'bg-emerald-600 text-white rounded-tr-none' 
                                 : 'bg-white text-gray-700 border border-gray-100 rounded-tl-none'
                             }`}>
                                 {c.text}
-                                {c.role === 'ai' && (
-                                    <div className="mt-2 pt-2 border-t border-gray-50 flex items-center gap-1.5 opacity-40 grayscale">
-                                        <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></div>
-                                        <span className="text-[8px] font-black uppercase tracking-widest text-gray-400">Resposta FarmoLink IA</span>
-                                    </div>
-                                )}
                             </div>
                         </div>
                     ))}
                     
                     {loading && (
-                        <div className="flex justify-start animate-fade-in">
+                        <div className="flex justify-start">
                             <div className="bg-white p-4 rounded-3xl border border-gray-100 shadow-sm flex gap-2">
                                 <div className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce"></div>
                                 <div className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce delay-75"></div>
@@ -256,32 +234,33 @@ const HealthAssistantModal = ({ onClose, products }: { onClose: () => void, prod
                     )}
                 </div>
 
-                {/* RODAPÉ - INPUT FIXO */}
-                <div className="flex-shrink-0 p-6 bg-white border-t border-gray-100">
+                {/* RODAPÉ - INPUT FIXO (Sempre visível no fundo) */}
+                <div className="flex-shrink-0 p-6 bg-white border-t border-gray-100 z-[210]">
                     <div className="flex gap-3 bg-gray-50 p-2 rounded-[28px] border-2 border-gray-100 focus-within:border-emerald-500 focus-within:bg-white transition-all shadow-inner">
                         <input 
-                            className="flex-1 px-4 py-3 bg-transparent outline-none font-bold text-sm text-gray-700"
-                            placeholder="Escreva sua dúvida..."
+                            className="flex-1 px-4 py-3 bg-transparent outline-none font-bold text-sm text-gray-700 disabled:opacity-50"
+                            placeholder={loading ? "FarmoBot está pensando..." : "Escreva sua dúvida..."}
                             value={msg}
                             onChange={e => setMsg(e.target.value)}
                             onKeyPress={e => e.key === 'Enter' && handleAsk()}
+                            disabled={loading}
                         />
                         <button 
                             onClick={handleAsk} 
                             disabled={loading || !msg.trim()} 
-                            className="p-4 bg-emerald-600 text-white rounded-2xl hover:bg-emerald-700 shadow-xl disabled:bg-gray-200 disabled:shadow-none transition-all active:scale-95"
+                            className="p-4 bg-emerald-600 text-white rounded-2xl hover:bg-emerald-700 shadow-xl disabled:bg-gray-200 disabled:shadow-none transition-all active:scale-95 flex items-center justify-center shrink-0"
                         >
-                            <Send size={20}/>
+                            {loading ? <Loader2 className="animate-spin" size={20}/> : <Send size={20}/>}
                         </button>
                     </div>
-                    <p className="text-[8px] text-center text-gray-400 font-black uppercase tracking-widest mt-4">Tecnologia Gemini AI integrada ao FarmoLink</p>
+                    <p className="text-[8px] text-center text-gray-400 font-black uppercase tracking-widest mt-4">Tecnologia FarmoLink AI integrada</p>
                 </div>
             </div>
         </div>
     );
 };
 
-// --- CART VIEW SIMPLIFICADO (PAGAMENTO PRESENCIAL) ---
+// --- CART VIEW ---
 export const CartView = ({ items, pharmacies, updateQuantity, onCheckout, userAddress, onBack }: any) => {
     const [type, setType] = useState<'DELIVERY' | 'PICKUP'>('DELIVERY');
     const [isProcessing, setIsProcessing] = useState(false);
@@ -317,7 +296,6 @@ export const CartView = ({ items, pharmacies, updateQuantity, onCheckout, userAd
                     </div>
 
                     <div className="space-y-4">
-                        <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] ml-2">Medicamentos Selecionados</h4>
                         {items.map((it: any) => (
                             <div key={it.id} className="bg-white p-5 rounded-3xl border flex items-center gap-4 shadow-sm animate-scale-in group">
                                 <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center p-2 border group-hover:border-emerald-200 transition-colors">
@@ -379,8 +357,6 @@ export const CartView = ({ items, pharmacies, updateQuantity, onCheckout, userAd
                         >
                             {isProcessing ? <Loader2 className="animate-spin" size={28} /> : <>FINALIZAR PEDIDO <ChevronRight size={24}/></>}
                         </Button>
-                        
-                        <p className="text-[9px] text-center text-emerald-300/60 font-black uppercase tracking-widest pt-2">Seu pedido será enviado imediatamente.</p>
                     </div>
                 </div>
             </div>
