@@ -87,6 +87,7 @@ const App: React.FC = () => {
   const lastPendingCountRef = useRef(0);
   const lastRxCountRef = useRef(0);
   const isInitialLoadDone = useRef(false);
+  const hasRedirectedRef = useRef(false);
 
   const handleCleanup = useCallback(() => {
     setUser(null);
@@ -99,6 +100,7 @@ const App: React.FC = () => {
     setPharmacyStatus(null);
     setCriticalAlert(null);
     isInitialLoadDone.current = false;
+    hasRedirectedRef.current = false;
   }, []);
 
   const handleLogout = useCallback(async () => { 
@@ -110,16 +112,6 @@ const App: React.FC = () => {
   const loadData = useCallback(async (u: User, forceStatic = false) => {
       if (!u) return;
       try {
-          // Garante que a sessão esteja ativa antes de carregar
-          const { data: { session } } = await supabase.auth.getSession();
-          if (!session) {
-              const { data: refreshed } = await supabase.auth.refreshSession();
-              if (!refreshed.session) {
-                  handleLogout();
-                  return;
-              }
-          }
-
           if (!isInitialLoadDone.current || forceStatic) {
               const [phData, prDataFetched] = await Promise.all([
                   fetchPharmacies(u.role === UserRole.ADMIN),
@@ -172,16 +164,21 @@ const App: React.FC = () => {
               setOrders(allOrders || []);
           }
       } catch (err) { 
-          console.warn("Sync falhou, tentando reconectar canal..."); 
+          console.warn("Sync silencioso falhou."); 
       }
-  }, [products.length, handleLogout]);
+  }, [products.length]);
 
-  const handleLogin = useCallback((u: User) => {
+  const handleLogin = useCallback((u: User, shouldRedirect: boolean = true) => {
     setUser(u);
-    setPage(u.role === UserRole.CUSTOMER ? 'home' : (u.role === UserRole.PHARMACY ? 'dashboard' : 'overview'));
+    // Só redireciona se for o login inicial e ainda não tivermos redirecionado nesta sessão
+    if (shouldRedirect && !hasRedirectedRef.current) {
+        setPage(u.role === UserRole.CUSTOMER ? 'home' : (u.role === UserRole.PHARMACY ? 'dashboard' : 'overview'));
+        hasRedirectedRef.current = true;
+    }
     loadData(u);
   }, [loadData]);
 
+  // EFEITO 1: Inicialização Única da Autenticação
   useEffect(() => {
     const timer = setTimeout(() => {
         if (authChecking) setShowResetButton(true);
@@ -189,18 +186,6 @@ const App: React.FC = () => {
 
     const handleForceLogout = () => handleLogout();
     window.addEventListener('force-logout', handleForceLogout);
-
-    // SOLUÇÃO DEFINITIVA: Reconectar ao voltar para a aba ou focar a janela
-    const handleReactivate = () => {
-        if (document.visibilityState === 'visible' && user) {
-            console.log("Aba reativada. Sincronizando banco de dados...");
-            loadData(user);
-            // Reinicia canais realtime que podem ter morrido
-            supabase.getChannels().forEach(ch => ch.unsubscribe().then(() => ch.subscribe()));
-        }
-    };
-    window.addEventListener('visibilitychange', handleReactivate);
-    window.addEventListener('focus', handleReactivate);
 
     const initAuth = async () => {
         try {
@@ -213,7 +198,7 @@ const App: React.FC = () => {
                         setProducts(cached.products || []);
                         setPharmacies(cached.pharmacies || []);
                     }
-                    handleLogin(u);
+                    handleLogin(u, true);
                 }
             }
         } catch (e) {
@@ -226,13 +211,14 @@ const App: React.FC = () => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
           const u = await getCurrentUser();
-          if (u) handleLogin(u);
-          setAuthChecking(false);
-      } else if (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
-          if (event === 'SIGNED_OUT') {
-              handleCleanup();
-              setAuthChecking(false);
+          if (u) {
+              // Se já temos o usuário, não forçamos redirecionamento para não quebrar a navegação
+              handleLogin(u, event === 'SIGNED_IN');
           }
+          setAuthChecking(false);
+      } else if (event === 'SIGNED_OUT') {
+          handleCleanup();
+          setAuthChecking(false);
       }
     });
 
@@ -241,24 +227,40 @@ const App: React.FC = () => {
         subscription.unsubscribe();
         clearTimeout(timer);
         window.removeEventListener('force-logout', handleForceLogout);
+    };
+  }, []); // Sem dependências para não rodar em loop
+
+  // EFEITO 2: Monitor de Feedback e Foco (Garante que os dados não estagnem)
+  useEffect(() => {
+    if (!user) return;
+
+    const handleReactivate = () => {
+        if (document.visibilityState === 'visible') {
+            loadData(user);
+            // Reconecta canais se necessário
+            supabase.getChannels().forEach(ch => {
+                if (ch.state === 'closed') ch.subscribe();
+            });
+        }
+    };
+
+    window.addEventListener('visibilitychange', handleReactivate);
+    window.addEventListener('focus', handleReactivate);
+
+    // Heartbeat de sessão para evitar expiração do socket
+    const heartbeat = setInterval(async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) await supabase.auth.refreshSession();
+    }, 2 * 60 * 1000);
+
+    return () => {
         window.removeEventListener('visibilitychange', handleReactivate);
         window.removeEventListener('focus', handleReactivate);
+        clearInterval(heartbeat);
     };
-  }, [handleLogin, handleLogout, handleCleanup, authChecking, user, loadData]);
+  }, [user, loadData]);
 
-  // HEARTBEAT AGRESSIVO (A cada 2 minutos para não deixar o Cloudflare/Browser matar a conexão)
-  useEffect(() => {
-      if (!user) return;
-      const heartbeat = setInterval(async () => {
-          const { error } = await supabase.auth.getSession();
-          if (error) {
-              const { error: refreshError } = await supabase.auth.refreshSession();
-              if (refreshError) handleLogout();
-          }
-      }, 2 * 60 * 1000); 
-      return () => clearInterval(heartbeat);
-  }, [user, handleLogout]);
-
+  // EFEITO 3: Canais Realtime
   useEffect(() => {
       if (!user) return;
       const channel = supabase
@@ -316,23 +318,22 @@ const App: React.FC = () => {
   if (authChecking) return (
     <div className="h-screen flex flex-col items-center justify-center bg-white p-6 text-center">
         <div className="w-12 h-12 border-4 border-emerald-100 border-t-emerald-600 rounded-full animate-spin"></div>
-        <p className="mt-4 text-xs font-black text-gray-400 uppercase tracking-widest animate-pulse">Estabelecendo Conexão Segura...</p>
+        <p className="mt-4 text-xs font-black text-gray-400 uppercase tracking-widest animate-pulse">Autenticando Rede...</p>
         
         {showResetButton && (
             <div className="mt-12 animate-fade-in">
-                <p className="text-xs text-gray-400 mb-4 font-medium">O banco de dados demorou a responder.</p>
                 <button 
                     onClick={forceNuclearReset}
                     className="flex items-center gap-2 px-6 py-3 bg-gray-100 text-gray-600 rounded-2xl text-[10px] font-black uppercase hover:bg-emerald-50 hover:text-emerald-600 transition-all border border-gray-200"
                 >
-                    <RotateCcw size={14}/> Forçar Sincronização
+                    <RotateCcw size={14}/> Forçar Reinício
                 </button>
             </div>
         )}
     </div>
   );
 
-  if (!user) return page === 'auth' ? <AuthView onLogin={handleLogin} /> : <LandingPage onLoginClick={() => setPage('auth')} />;
+  if (!user) return page === 'auth' ? <AuthView onLogin={(u) => handleLogin(u, true)} /> : <LandingPage onLoginClick={() => setPage('auth')} />;
 
   return (
     <MainLayout user={user} activePage={page} onNavigate={setPage} onLogout={handleLogout} menuItems={user.role === UserRole.CUSTOMER ? CUSTOMER_MENU : (user.role === UserRole.PHARMACY ? PHARMACY_MENU : ADMIN_MENU)} cartCount={cart.reduce((acc, item) => acc + item.quantity, 0)}>
