@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { playSound } from '../services/soundService';
-import { X, CheckCircle, AlertCircle, Info } from 'lucide-react';
+import { X, CheckCircle, AlertCircle, Info, Loader2 } from 'lucide-react';
 
 export const Button: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'outline' | 'danger' }> = ({ 
   children, 
@@ -31,6 +31,13 @@ export const Button: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { 
   );
 };
 
+export const LoadingOverlay = () => (
+    <div className="fixed inset-0 z-[9999] bg-white/60 backdrop-blur-[2px] flex flex-col items-center justify-center animate-fade-in">
+        <div className="w-16 h-16 border-4 border-emerald-100 border-t-emerald-600 rounded-full animate-spin"></div>
+        <p className="mt-4 text-[10px] font-black text-emerald-800 uppercase tracking-[0.3em] animate-pulse">Processando Operação...</p>
+    </div>
+);
+
 export const Card: React.FC<React.HTMLAttributes<HTMLDivElement> & { title?: string }> = ({ children, className = '', title, ...props }) => (
   <div className={`bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden ${className}`} {...props}>
     {title && <div className="px-6 py-4 border-b border-gray-100 font-semibold text-lg text-gray-800">{title}</div>}
@@ -56,7 +63,6 @@ export const Badge: React.FC<{ children: React.ReactNode, color?: 'green' | 'blu
   );
 };
 
-// --- NOVO: Componente de Toast para substituição do alert() ---
 export const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error' | 'info', onClose: () => void }) => {
     useEffect(() => {
         const timer = setTimeout(onClose, 5000);

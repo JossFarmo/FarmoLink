@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MainLayout } from './components/Layout';
 import { AuthView, UpdatePasswordView } from './components/Auth';
 import { LandingPage } from './components/LandingPage';
-import { Toast } from './components/UI';
+import { Toast, LoadingOverlay } from './components/UI';
 import { supabase } from './services/supabaseClient';
 
 // Views
@@ -68,8 +68,11 @@ const ADMIN_MENU = [
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
+  const [globalLoading, setGlobalLoading] = useState(false);
   const [showResetButton, setShowResetButton] = useState(false);
-  const [page, setPage] = useState('home'); 
+  
+  // Persistência de Navegação: Recupera a última página acessada
+  const [page, setPage] = useState(() => sessionStorage.getItem('last_page') || 'home'); 
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error' | 'info'} | null>(null);
 
   const [products, setProducts] = useState<Product[]>([]);
@@ -87,11 +90,16 @@ const App: React.FC = () => {
   const lastPendingCountRef = useRef(0);
   const lastRxCountRef = useRef(0);
   const isInitialLoadDone = useRef(false);
-  const hasRedirectedRef = useRef(false);
+
+  // Efeito para salvar a página atual na sessão
+  useEffect(() => {
+    if (user) sessionStorage.setItem('last_page', page);
+  }, [page, user]);
 
   const handleCleanup = useCallback(() => {
     setUser(null);
     setPage('home');
+    sessionStorage.removeItem('last_page');
     setProducts([]);
     setPharmacies([]);
     setOrders([]);
@@ -100,12 +108,13 @@ const App: React.FC = () => {
     setPharmacyStatus(null);
     setCriticalAlert(null);
     isInitialLoadDone.current = false;
-    hasRedirectedRef.current = false;
   }, []);
 
   const handleLogout = useCallback(async () => { 
+    setGlobalLoading(true);
     await signOutUser(); 
     handleCleanup();
+    setGlobalLoading(false);
     playSound('logout');
   }, [handleCleanup]);
 
@@ -164,26 +173,22 @@ const App: React.FC = () => {
               setOrders(allOrders || []);
           }
       } catch (err) { 
-          console.warn("Sync silencioso falhou."); 
+          console.warn("Sincronização silenciosa interrompida."); 
       }
   }, [products.length]);
 
-  const handleLogin = useCallback((u: User, shouldRedirect: boolean = true) => {
+  const handleLogin = useCallback((u: User, isFirstLoad: boolean = false) => {
     setUser(u);
-    // Só redireciona se for o login inicial e ainda não tivermos redirecionado nesta sessão
-    if (shouldRedirect && !hasRedirectedRef.current) {
-        setPage(u.role === UserRole.CUSTOMER ? 'home' : (u.role === UserRole.PHARMACY ? 'dashboard' : 'overview'));
-        hasRedirectedRef.current = true;
+    // Só redireciona se for o login "frio" e não houver página salva na sessão
+    if (isFirstLoad && !sessionStorage.getItem('last_page')) {
+        const defaultPage = u.role === UserRole.CUSTOMER ? 'home' : (u.role === UserRole.PHARMACY ? 'dashboard' : 'overview');
+        setPage(defaultPage);
     }
     loadData(u);
   }, [loadData]);
 
-  // EFEITO 1: Inicialização Única da Autenticação
   useEffect(() => {
-    const timer = setTimeout(() => {
-        if (authChecking) setShowResetButton(true);
-    }, 4000);
-
+    const timer = setTimeout(() => { if (authChecking) setShowResetButton(true); }, 4000);
     const handleForceLogout = () => handleLogout();
     window.addEventListener('force-logout', handleForceLogout);
 
@@ -202,7 +207,7 @@ const App: React.FC = () => {
                 }
             }
         } catch (e) {
-            console.error("Erro na inicialização:", e);
+            console.error("Auth Fail:", e);
         } finally {
             setAuthChecking(false);
         }
@@ -211,10 +216,7 @@ const App: React.FC = () => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
           const u = await getCurrentUser();
-          if (u) {
-              // Se já temos o usuário, não forçamos redirecionamento para não quebrar a navegação
-              handleLogin(u, event === 'SIGNED_IN');
-          }
+          if (u) handleLogin(u, event === 'SIGNED_IN');
           setAuthChecking(false);
       } else if (event === 'SIGNED_OUT') {
           handleCleanup();
@@ -228,47 +230,19 @@ const App: React.FC = () => {
         clearTimeout(timer);
         window.removeEventListener('force-logout', handleForceLogout);
     };
-  }, []); // Sem dependências para não rodar em loop
+  }, [handleLogin, handleLogout, handleCleanup]);
 
-  // EFEITO 2: Monitor de Feedback e Foco (Garante que os dados não estagnem)
+  // Sincronização de Foco (Pilar de confiança do Admin e Farmácia)
   useEffect(() => {
     if (!user) return;
-
     const handleReactivate = () => {
         if (document.visibilityState === 'visible') {
             loadData(user);
-            // Reconecta canais se necessário
-            supabase.getChannels().forEach(ch => {
-                if (ch.state === 'closed') ch.subscribe();
-            });
+            supabase.getChannels().forEach(ch => { if (ch.state === 'closed') ch.subscribe(); });
         }
     };
-
     window.addEventListener('visibilitychange', handleReactivate);
-    window.addEventListener('focus', handleReactivate);
-
-    // Heartbeat de sessão para evitar expiração do socket
-    const heartbeat = setInterval(async () => {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) await supabase.auth.refreshSession();
-    }, 2 * 60 * 1000);
-
-    return () => {
-        window.removeEventListener('visibilitychange', handleReactivate);
-        window.removeEventListener('focus', handleReactivate);
-        clearInterval(heartbeat);
-    };
-  }, [user, loadData]);
-
-  // EFEITO 3: Canais Realtime
-  useEffect(() => {
-      if (!user) return;
-      const channel = supabase
-          .channel('db-live-sync')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => loadData(user))
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'prescriptions' }, () => loadData(user))
-          .subscribe();
-      return () => { supabase.removeChannel(channel); };
+    return () => window.removeEventListener('visibilitychange', handleReactivate);
   }, [user, loadData]);
 
   const handleAddToCart = (product: Product) => {
@@ -288,6 +262,7 @@ const App: React.FC = () => {
 
   const handleCheckout = async (type: 'DELIVERY' | 'PICKUP', address: string, total: number) => {
       if (!user || cart.length === 0) return;
+      setGlobalLoading(true);
       const res = await createOrder({
           customerName: user.name,
           customerPhone: user.phone,
@@ -298,6 +273,7 @@ const App: React.FC = () => {
           pharmacyId: cart[0].pharmacyId,
           address: address
       });
+      setGlobalLoading(false);
 
       if (res.success) {
           setCart([]);
@@ -305,30 +281,18 @@ const App: React.FC = () => {
           playSound('success');
           setToast({ msg: "Pedido realizado com sucesso!", type: 'success' });
       } else {
-          setToast({ msg: "Erro ao finalizar pedido.", type: 'error' });
+          setToast({ msg: res.error || "Erro ao finalizar pedido.", type: 'error' });
       }
   };
 
-  const forceNuclearReset = () => {
-      localStorage.clear();
-      sessionStorage.clear();
-      window.location.reload();
-  };
-
   if (authChecking) return (
-    <div className="h-screen flex flex-col items-center justify-center bg-white p-6 text-center">
+    <div className="h-screen flex flex-col items-center justify-center bg-white p-6">
         <div className="w-12 h-12 border-4 border-emerald-100 border-t-emerald-600 rounded-full animate-spin"></div>
-        <p className="mt-4 text-xs font-black text-gray-400 uppercase tracking-widest animate-pulse">Autenticando Rede...</p>
-        
+        <p className="mt-4 text-[10px] font-black text-gray-400 uppercase tracking-widest animate-pulse">Sincronizando Rede...</p>
         {showResetButton && (
-            <div className="mt-12 animate-fade-in">
-                <button 
-                    onClick={forceNuclearReset}
-                    className="flex items-center gap-2 px-6 py-3 bg-gray-100 text-gray-600 rounded-2xl text-[10px] font-black uppercase hover:bg-emerald-50 hover:text-emerald-600 transition-all border border-gray-200"
-                >
-                    <RotateCcw size={14}/> Forçar Reinício
-                </button>
-            </div>
+            <button onClick={() => window.location.reload()} className="mt-8 px-6 py-2 bg-gray-100 text-gray-500 rounded-xl text-[10px] font-black hover:bg-emerald-50 hover:text-emerald-600 transition-all border border-gray-200">
+                <RotateCcw size={14} className="inline mr-2"/> Reiniciar Conexão
+            </button>
         )}
     </div>
   );
@@ -338,6 +302,7 @@ const App: React.FC = () => {
   return (
     <MainLayout user={user} activePage={page} onNavigate={setPage} onLogout={handleLogout} menuItems={user.role === UserRole.CUSTOMER ? CUSTOMER_MENU : (user.role === UserRole.PHARMACY ? PHARMACY_MENU : ADMIN_MENU)} cartCount={cart.reduce((acc, item) => acc + item.quantity, 0)}>
         {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
+        {globalLoading && <LoadingOverlay />}
         
         {user.role === UserRole.PHARMACY ? (
             pharmacyStatus === 'PENDING' ? <PharmacyPendingView user={user} onCheckAgain={() => loadData(user)} onLogout={handleLogout} /> :
