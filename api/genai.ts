@@ -61,7 +61,8 @@ export default async function handler(req: any, res: any) {
 
     res.status(200).json({ text: response.text });
   } catch (err: any) {
-    console.error('genai func error', err?.message || err);
-    res.status(500).json({ error: 'Assistente temporariamente indisponível.' });
+    console.error('genai func error', err);
+    // Include message in response for temporary debugging (do not expose sensitive data in production)
+    res.status(500).json({ error: 'Assistente temporariamente indisponível.', details: err?.message || String(err) });
   }
 }
