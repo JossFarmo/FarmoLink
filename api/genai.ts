@@ -42,9 +42,11 @@ export default async function handler(req: any, res: any) {
     }
 
   const ai = new GoogleGenAI({ apiKey: KEY });
-    const response = await ai.models.generateContent({
-      model: process.env.AI_MODEL || 'gemini-3-flash-preview',
-      contents: `Você é o FarmoBot, o assistente inteligente da FarmoLink, a maior rede de farmácias online de Angola.
+    let response: any;
+    try {
+      response = await ai.models.generateContent({
+        model: process.env.AI_MODEL || 'gemini-3-flash-preview',
+        contents: `Você é o FarmoBot, o assistente inteligente da FarmoLink, a maior rede de farmácias online de Angola.
 
       DIRETRIZES DE PERSONALIDADE:
       - Seja prestativo, educado e use um tom profissional.
@@ -57,7 +59,14 @@ export default async function handler(req: any, res: any) {
       - IMPORTANTE: No final de cada resposta, adicione: "Nota: Sou uma inteligência artificial. Para diagnósticos precisos, consulte sempre um médico ou farmacêutico presencialmente."
 
       PERGUNTA DO CLIENTE: ${message}`,
-    });
+      });
+    } catch (aiErr: any) {
+      console.error('genai SDK error', aiErr);
+      // Try to extract meaningful information from the SDK error
+      const details = aiErr?.message || aiErr?.toString() || JSON.stringify(aiErr);
+      res.status(500).json({ error: 'Assistente temporariamente indisponível (SDK).', details });
+      return;
+    }
 
     res.status(200).json({ text: response.text });
   } catch (err: any) {
