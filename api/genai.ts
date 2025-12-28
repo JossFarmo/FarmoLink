@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import { GoogleGenAI } from '@google/genai';
 
 // Vercel Serverless Function - handles POST requests from the client and proxies to Gemini
 export default async function handler(req: any, res: any) {
@@ -29,6 +28,16 @@ export default async function handler(req: any, res: any) {
 
     // Build a lightweight stock context
     const stockContext = (products || []).slice(0, 50).map((p: any) => `${p.name} (Preço: Kz ${p.price?.toLocaleString?.() || p.price})`).join(', ');
+
+    // Import SDK lazily to avoid module-load errors if environment can't load native libs
+    let GoogleGenAI: any;
+    try {
+      ({ GoogleGenAI } = await import('@google/genai'));
+    } catch (err) {
+      console.error('Failed to import @google/genai in serverless function', err);
+      res.status(500).json({ error: 'Assistente temporariamente indisponível (falha ao carregar SDK).' });
+      return;
+    }
 
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
