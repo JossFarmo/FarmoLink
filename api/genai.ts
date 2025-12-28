@@ -64,7 +64,9 @@ export default async function handler(req: any, res: any) {
       console.error('genai SDK error', aiErr);
       // Try to extract meaningful information from the SDK error
       const details = aiErr?.message || aiErr?.toString() || JSON.stringify(aiErr);
-      res.status(500).json({ error: 'Assistente temporariamente indisponível (SDK).', details });
+      const stack = aiErr?.stack;
+      const sdkInfo = aiErr?.response || aiErr?.data || null;
+      res.status(500).json({ error: 'Assistente temporariamente indisponível (SDK).', details, stack: stack ? stack.split('\n').slice(0,3).join('\n') : undefined, sdkInfo });
       return;
     }
 
