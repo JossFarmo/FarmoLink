@@ -5,8 +5,9 @@ export default async function handler(req: any, res: any) {
   try {
     // Health / debug: allow a GET to check if API key is configured (safe: does NOT return the key)
     if (req.method === 'GET') {
-      const hasKey = !!process.env.API_KEY;
-      return res.status(200).json({ ok: true, hasApiKey: hasKey, model: process.env.AI_MODEL || null });
+      const key = process.env.API_KEY || process.env.GEMINI_API_KEY || null;
+      const source = process.env.API_KEY ? 'API_KEY' : (process.env.GEMINI_API_KEY ? 'GEMINI_API_KEY' : null);
+      return res.status(200).json({ ok: true, hasApiKey: !!key, apiKeySource: source, model: process.env.AI_MODEL || null });
     }
 
     if (req.method !== 'POST') {
@@ -20,9 +21,10 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    if (!process.env.API_KEY) {
-      console.error('API_KEY missing in environment');
-      res.status(500).json({ error: 'Assistente indisponível: chave de API não configurada no servidor. Defina API_KEY no painel do Vercel.' });
+    const KEY = process.env.API_KEY || process.env.GEMINI_API_KEY || null;
+    if (!KEY) {
+      console.error('API_KEY / GEMINI_API_KEY missing in environment');
+      res.status(500).json({ error: 'Assistente indisponível: chave de API não configurada no servidor. Defina API_KEY (ou GEMINI_API_KEY) no painel do Vercel.' });
       return;
     }
 
@@ -39,7 +41,7 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: KEY });
     const response = await ai.models.generateContent({
       model: process.env.AI_MODEL || 'gemini-3-flash-preview',
       contents: `Você é o FarmoBot, o assistente inteligente da FarmoLink, a maior rede de farmácias online de Angola.
