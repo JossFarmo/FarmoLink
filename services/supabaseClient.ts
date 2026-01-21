@@ -1,8 +1,9 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = 'https://fsagvxkwihqiscvjtjvz.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZzYWd2eGt3aWhxaXNjdmp0anZ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU0NDE0ODQsImV4cCI6MjA4MTAxNzQ4NH0.ei8J3QJtZ1N2blgqAFM3U9_O3YjCalQV4YGu5hssk4A';
+// CREDENCIAIS DO SEU NOVO PROJETO SUPABASE
+const supabaseUrl = 'https://hbnomhpgfigenobcmqsm.supabase.co';
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imhibm9taHBnZmlnZW5vYmNtcXNtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc2NjQ2NjYsImV4cCI6MjA4MzI0MDY2Nn0.LclMCmqYrtuoz-PbREN-xjdsW76wDkhXIGfLLaV2NYM';
 
 export const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: {
@@ -13,38 +14,33 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
     storageKey: 'farmolink-auth-token'
   },
   global: {
-    headers: { 'x-application-name': 'farmolink-web' }
+    headers: { 'x-application-name': 'farmolink-mobile' }
   }
 });
 
 /**
- * Utilitário de resiliência: Tenta executar uma função e repete se houver erro de rede.
- * Se detectar erro de autenticação, tenta forçar um refresh antes de falhar.
+ * safeQuery: Utilitário para evitar falhas críticas em conexões instáveis.
  */
-export const safeQuery = async <T>(fn: () => Promise<T>, retries = 1): Promise<T | null> => {
+export const safeQuery = async <T>(fn: () => Promise<T>, retries = 3): Promise<T | null> => {
     try {
         const result = await fn();
+        const potentialError = (result as any)?.error;
         
-        // Verificação de erro de autenticação no padrão do Supabase
-        if ((result as any)?.error) {
-            const error = (result as any).error;
-            if (error.status === 401 || error.status === 403) {
-                console.warn("Sessão possivelmente expirada. Tentando recuperar...");
-                const { data } = await supabase.auth.refreshSession();
-                if (data?.session && retries > 0) {
-                    return safeQuery(fn, retries - 1);
-                }
-                window.dispatchEvent(new CustomEvent('force-logout'));
-                return null;
+        if (potentialError) {
+            console.warn("[FarmoLink DB]:", potentialError.message || potentialError);
+            if (potentialError.status === 401) {
+                await supabase.auth.refreshSession();
+                return retries > 0 ? safeQuery(fn, retries - 1) : null;
             }
+            return null;
         }
         return result;
     } catch (err: any) {
-        if (retries > 0 && (err.message?.includes('fetch') || err.message?.includes('JWT'))) {
-            await new Promise(res => setTimeout(res, 1000));
+        if (retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, 1500));
             return safeQuery(fn, retries - 1);
         }
-        console.error("Erro persistente na query:", err);
+        console.error("Erro Crítico FarmoLink:", err.message || err);
         return null;
     }
 };

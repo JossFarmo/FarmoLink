@@ -1,233 +1,293 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
-import { Card, Button, Badge } from '../components/UI';
+import { Card, Badge, Button } from '../components/UI';
 import { PrescriptionRequest, QuotedItem, Product } from '../types';
-import { fetchPrescriptionRequests, sendPrescriptionQuote, rejectPrescription, fetchProducts } from '../services/dataService';
-import { Eye, X, Check, Plus, Trash2, AlertTriangle, ChevronRight, FileText, Clock, User as UserIcon, Send, Search, PackageCheck, History, ListFilter, TrendingDown, Loader2 } from 'lucide-react';
+import { sendPrescriptionQuote, validatePrescriptionAI } from '../services/orderService';
+import { fetchPharmacyInventory } from '../services/productService';
+import { supabase } from '../services/supabaseClient';
+import { X, Plus, Trash2, FileText, Send, Search, Loader2, BrainCircuit, Eye, RefreshCw, Sparkles, MessageSquare, Phone, User, CheckCircle2, Calculator, Ban, AlertTriangle, AlertOctagon } from 'lucide-react';
 import { playSound } from '../services/soundService';
 import { formatProductNameForCustomer } from '../services/geminiService';
 
-const normalizeText = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const normalizeForSearch = (t: string) => 
+    t.normalize("NFD")
+     .replace(/[\u0300-\u036f]/g, "")
+     .toLowerCase()
+     .replace(/[^a-z0-9\s]/g, '')
+     .trim();
 
-export const PharmacyRequestsModule = ({ pharmacyId, requests, onRefresh }: { pharmacyId: string, requests: PrescriptionRequest[], onRefresh: () => void }) => {
-    const [viewMode, setViewMode] = useState<'PENDING' | 'ANSWERED'>('PENDING');
+// --- FIX 4: ALGORITMO FUZZY TOKENIZADO MELHORADO ---
+const findBestStockMatch = (aiName: string, stock: Product[]): Product | null => {
+    const cleanAi = normalizeForSearch(aiName);
+    const aiTokens = cleanAi.split(' ').filter(t => t.length >= 2); 
+
+    if (aiTokens.length === 0) return null;
+
+    let bestMatch: Product | null = null;
+    let maxScore = 0;
+
+    for (const prod of stock) {
+        const cleanStock = normalizeForSearch(prod.name);
+        const stockTokens = cleanStock.split(' ');
+        let score = 0;
+
+        // Match Exato
+        if (cleanStock === cleanAi) score += 50;
+        
+        // Todos os tokens da IA aparecem no stock (ordem livre)?
+        const hasAllTokens = aiTokens.every(token => cleanStock.includes(token));
+        if (hasAllTokens) score += 30;
+
+        // Quantos tokens batem?
+        const matchedTokensCount = aiTokens.filter(t => stockTokens.some(st => st.includes(t))).length;
+        score += matchedTokensCount * 5;
+
+        // Bônus para números (dosagens como 250mg, 500)
+        const numbersInAi = aiName.match(/\d+/g);
+        if (numbersInAi) {
+            const allNumbersMatch = numbersInAi.every(n => cleanStock.includes(n));
+            if (allNumbersMatch) score += 15;
+        }
+
+        if (score > maxScore && score >= 20) { 
+            maxScore = score;
+            bestMatch = prod;
+        }
+    }
+
+    return bestMatch;
+};
+
+export const PharmacyRequestsModule = ({ pharmacyId, requests: initialRequests, onRefresh }: { pharmacyId: string, requests: PrescriptionRequest[], onRefresh: () => void }) => {
+    const [viewMode, setViewMode] = useState<'PENDING' | 'REVIEWS' | 'ANSWERED'>('PENDING');
     const [analysisMode, setAnalysisMode] = useState<PrescriptionRequest | null>(null);
-    const [isOpening, setIsOpening] = useState(false);
-    const [analysisStep, setAnalysisStep] = useState<'DECISION' | 'LEGIBLE' | 'ILLEGIBLE' | 'INVALID'>('DECISION');
-    const [quoteItems, setQuoteItems] = useState<QuotedItem[]>([]);
-    const [newItem, setNewItem] = useState({ name: '', qty: 1, price: 0 });
-    const [deliveryFee, setDeliveryFee] = useState(600);
-    const [notes, setNotes] = useState('');
+    const [quoteItems, setQuoteItems] = useState<(QuotedItem & { currentStock?: number })[]>([]);
+    const [newItem, setNewItem] = useState({ name: '', qty: 1, price: '', unitType: 'Unidade', id: '', currentStock: 0 }); 
     const [isSending, setIsSending] = useState(false);
-
-    const [myStock, setMyStock] = useState<Product[]>([]);
     const [showSuggestions, setShowSuggestions] = useState(false);
+    const [myStock, setMyStock] = useState<Product[]>([]);
+    const [isSyncing, setIsSyncing] = useState(false);
+    
+    const [pharmacyName, setPharmacyName] = useState('Sua Farmácia');
+    const [quoteNotes, setQuoteNotes] = useState('');
+    const [customerContact, setCustomerContact] = useState<{name: string, phone: string} | null>(null);
+
+    const pendingRequests = initialRequests.filter(r => r.status === 'WAITING_FOR_QUOTES' && !r.quotes?.some(q => q.pharmacyId === pharmacyId));
+    const lowConfidenceRequests = initialRequests.filter(r => r.status === 'UNDER_REVIEW');
+    const answeredRequests = initialRequests.filter(r => r.quotes?.some(q => q.pharmacyId === pharmacyId) || (r.status === 'ILLEGIBLE' && r.ai_metadata?.validated_by === pharmacyId));
 
     useEffect(() => {
-        loadStock();
+        if(pharmacyId) {
+            onRefresh();
+            supabase.from('pharmacies').select('name').eq('id', pharmacyId).single()
+                .then(({data}) => { if(data) setPharmacyName(data.name); });
+        }
     }, [pharmacyId]);
 
-    const loadStock = async () => {
-        const products = await fetchProducts(pharmacyId);
-        setMyStock(products);
+    useEffect(() => { 
+        const load = async () => {
+            const data = await fetchPharmacyInventory(pharmacyId);
+            setMyStock(data);
+        };
+        load();
+    }, [pharmacyId]);
+
+    const totalQuoteValue = useMemo(() => quoteItems.reduce((acc, item) => acc + (Number(item.price) * Number(item.quantity || 1)), 0), [quoteItems]);
+
+    const handleSync = async () => {
+        setIsSyncing(true);
+        await onRefresh();
+        const freshStock = await fetchPharmacyInventory(pharmacyId, true);
+        setMyStock(freshStock);
+        setTimeout(() => setIsSyncing(false), 800);
     };
 
     const handleOpenAnalysis = (req: PrescriptionRequest) => {
-        setIsOpening(true);
-        playSound('click');
-        // Pequeno delay para garantir que a UI troque antes de carregar a imagem pesada
-        setTimeout(() => {
-            setAnalysisMode(req);
-            setAnalysisStep('DECISION');
+        setAnalysisMode(req);
+        if (req.status === 'ILLEGIBLE' || req.quotes?.some(q => q.pharmacyId === pharmacyId)) {
             setQuoteItems([]);
-            setNewItem({ name: '', qty: 1, price: 0 });
-            setIsOpening(false);
-        }, 50);
+            return;
+        }
+
+        if (req.ai_metadata?.suggested_items) {
+            const matchedItems = req.ai_metadata.suggested_items.map(aiItem => {
+                const stockMatch = findBestStockMatch(aiItem.name, myStock);
+                return {
+                    name: stockMatch ? formatProductNameForCustomer(stockMatch.name) : aiItem.name,
+                    quantity: aiItem.quantity || 1, 
+                    price: stockMatch ? stockMatch.price : 0,
+                    available: true,
+                    isMatched: !!stockMatch,
+                    unitType: stockMatch?.unitType || 'Unidade',
+                    productId: stockMatch?.id,
+                    currentStock: stockMatch?.stock || 0
+                };
+            });
+            setQuoteItems(matchedItems);
+        } else { setQuoteItems([]); }
     };
 
-    const handleSendQuote = async () => {
+    const handleMarkIllegible = async () => {
+        if(!analysisMode) return;
+        if(!confirm("Rejeitar esta receita por ser ilegível?")) return;
+        setIsSending(true);
+        const ok = await validatePrescriptionAI(analysisMode.id, pharmacyId, [], true, quoteNotes || "Receita Ilegível.");
+        if(ok) { setAnalysisMode(null); onRefresh(); }
+        setIsSending(false);
+    };
+
+    const handleValidateAndSend = async () => {
         if(!analysisMode || quoteItems.length === 0) return;
         setIsSending(true);
-        const success = await sendPrescriptionQuote(analysisMode.id, pharmacyId, "Sua Farmácia", quoteItems, deliveryFee, notes || "Orçamento FarmoLink");
+        if (analysisMode.status === 'UNDER_REVIEW') await validatePrescriptionAI(analysisMode.id, pharmacyId, quoteItems.map(i => ({ name: i.name, quantity: i.quantity })));
+        const ok = await sendPrescriptionQuote(analysisMode.id, pharmacyId, pharmacyName, quoteItems, 0, quoteNotes);
+        if (ok) { setAnalysisMode(null); onRefresh(); }
         setIsSending(false);
-        if(success) { 
-            playSound('success');
-            setAnalysisMode(null); 
-            onRefresh(); 
-        }
     };
 
-    const handleReject = async (reason: string) => {
-        if(!analysisMode) return;
-        setIsSending(true);
-        const success = await rejectPrescription(analysisMode.id, pharmacyId, "Sua Farmácia", reason);
-        setIsSending(false);
-        if(success) { 
-            playSound('click');
-            setAnalysisMode(null); 
-            onRefresh(); 
-        }
-    };
-
+    // --- FIX 5: SUGESTÕES DE STOCK TOKENIZADAS ---
     const stockSuggestions = useMemo(() => {
-        if (!newItem.name || newItem.name.length < 2) return [];
-        return myStock.filter(p => normalizeText(p.name).includes(normalizeText(newItem.name))).slice(0, 5);
+        const searchVal = normalizeForSearch(newItem.name);
+        if (searchVal.length < 2) return [];
+        const searchTokens = searchVal.split(' ').filter(t => t.length > 0);
+        
+        return myStock.filter(p => {
+            const prodVal = normalizeForSearch(p.name);
+            return searchTokens.every(t => prodVal.includes(t));
+        }).slice(0, 8);
     }, [myStock, newItem.name]);
 
     const selectFromStock = (product: Product) => {
-        setNewItem({ name: formatProductNameForCustomer(product.name), price: product.price, qty: 1 });
+        setNewItem({ name: formatProductNameForCustomer(product.name), price: String(product.price), qty: 1, unitType: product.unitType || 'Unidade', id: product.id, currentStock: product.stock });
         setShowSuggestions(false);
-        playSound('success');
     };
 
     const addItemToQuote = () => {
-        if(!newItem.name || newItem.price <= 0) return;
-        setQuoteItems([...quoteItems, { name: newItem.name, quantity: newItem.qty, price: newItem.price, available: true }]);
-        setNewItem({name:'', qty:1, price:0});
+        if(!newItem.name) return;
+        setQuoteItems([...quoteItems, { name: newItem.name, quantity: newItem.qty || 1, price: Number(newItem.price) || 0, available: true, unitType: newItem.unitType, productId: newItem.id || undefined, currentStock: newItem.currentStock }]);
+        setNewItem({name: '', qty: 1, price: '', unitType: 'Unidade', id: '', currentStock: 0});
         setShowSuggestions(false);
-        playSound('click');
     };
 
-    const pendingRequests = requests.filter(r => r.status !== 'COMPLETED' && !r.quotes?.some(q => q.pharmacyId === pharmacyId));
-    const answeredRequests = requests.filter(r => r.quotes?.some(q => q.pharmacyId === pharmacyId));
+    const isReadOnly = analysisMode ? (analysisMode.status === 'ILLEGIBLE' || analysisMode.quotes?.some(q => q.pharmacyId === pharmacyId)) : false;
 
     return (
-        <div className="space-y-8 animate-fade-in pb-20">
-            {isOpening && (
-                <div className="fixed inset-0 z-[300] bg-white/50 backdrop-blur-sm flex items-center justify-center">
-                    <Loader2 className="animate-spin text-emerald-600" size={48} />
-                </div>
-            )}
-
+        <div className="space-y-6 animate-fade-in pb-20">
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-white p-6 rounded-[32px] border shadow-sm gap-4">
-                <div className="min-w-0">
-                    <h2 className="text-2xl font-black text-gray-800 truncate">Cotações de Receitas</h2>
-                    <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">Gerencie solicitações de clientes</p>
+                <div className="flex items-center gap-4">
+                    <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl relative"><FileText size={24}/>{pendingRequests.length > 0 && <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white animate-ping"></span>}</div>
+                    <div><h2 className="text-xl font-black text-gray-800 uppercase tracking-tight">RECEITAS & ORÇAMENTOS</h2><p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest flex items-center gap-2">SINCRONIZAÇÃO EM TEMPO REAL <button onClick={handleSync} className={`p-1.5 bg-gray-50 text-emerald-600 rounded-lg ${isSyncing ? 'animate-spin' : ''}`}><RefreshCw size={14}/></button></p></div>
                 </div>
-                <div className="flex gap-2 w-full lg:w-auto overflow-x-auto no-scrollbar scroll-smooth p-1">
-                    <button 
-                        onClick={() => { setViewMode('PENDING'); playSound('click'); }}
-                        className={`flex-1 lg:flex-none flex items-center justify-center gap-3 px-6 py-3 rounded-2xl transition-all font-black text-xs sm:text-sm whitespace-nowrap min-w-fit ${viewMode === 'PENDING' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'}`}
-                    >
-                        Pendentes <Badge color={viewMode === 'PENDING' ? 'blue' : 'gray'} className="!bg-white/20 !text-white border-none">{pendingRequests.length}</Badge>
-                    </button>
-                    <button 
-                        onClick={() => { setViewMode('ANSWERED'); playSound('click'); }}
-                        className={`flex-1 lg:flex-none flex items-center justify-center gap-3 px-6 py-3 rounded-2xl transition-all font-black text-xs sm:text-sm whitespace-nowrap min-w-fit ${viewMode === 'ANSWERED' ? 'bg-emerald-600 text-white shadow-lg' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'}`}
-                    >
-                        Respondidas <Badge color={viewMode === 'ANSWERED' ? 'green' : 'gray'} className="!bg-white/20 !text-white border-none">{answeredRequests.length}</Badge>
-                    </button>
+                <div className="flex gap-2 w-full lg:w-auto overflow-x-auto no-scrollbar">
+                    <button onClick={() => setViewMode('PENDING')} className={`px-5 py-2.5 rounded-2xl font-black text-[10px] uppercase whitespace-nowrap ${viewMode === 'PENDING' ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-50 text-gray-400'}`}>POR ATENDER ({pendingRequests.length})</button>
+                    <button onClick={() => setViewMode('REVIEWS')} className={`px-5 py-2.5 rounded-2xl font-black text-[10px] uppercase whitespace-nowrap ${viewMode === 'REVIEWS' ? 'bg-orange-500 text-white shadow-lg' : 'bg-orange-50 text-orange-400'}`}>LETRA DIFÍCIL ({lowConfidenceRequests.length})</button>
+                    <button onClick={() => setViewMode('ANSWERED')} className={`px-5 py-2.5 rounded-2xl font-black text-[10px] uppercase whitespace-nowrap ${viewMode === 'ANSWERED' ? 'bg-emerald-600 text-white shadow-lg' : 'bg-gray-50 text-gray-400'}`}>HISTÓRICO ({answeredRequests.length})</button>
                 </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {(viewMode === 'PENDING' ? pendingRequests : answeredRequests).map(req => {
-                    const myQuote = req.quotes?.find(q => q.pharmacyId === pharmacyId);
-                    return (
-                        <Card key={req.id} className="p-0 overflow-hidden hover:shadow-xl transition-all border-gray-100 group">
-                            <div className="aspect-video bg-gray-900 relative overflow-hidden">
-                                <img src={req.imageUrl} className="w-full h-full object-cover opacity-60 group-hover:scale-105 transition-transform duration-700" loading="lazy" />
-                                <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent flex flex-col justify-end p-5">
-                                    <Badge color={viewMode === 'PENDING' ? 'yellow' : (myQuote?.status === 'ACCEPTED' ? 'green' : 'blue')} className="w-fit mb-2">
-                                        {viewMode === 'PENDING' ? 'AGUARDANDO' : myQuote?.status}
-                                    </Badge>
-                                    <p className="text-white font-black text-xs uppercase flex items-center gap-2"><Clock size={12}/> {req.date}</p>
-                                </div>
+                {(viewMode === 'PENDING' ? pendingRequests : (viewMode === 'REVIEWS' ? lowConfidenceRequests : answeredRequests)).map(req => (
+                    <Card key={req.id} className="p-0 overflow-hidden hover:shadow-xl transition-all border-gray-100 group h-full flex flex-col">
+                        <div className="aspect-video bg-gray-900 relative">
+                            <img src={req.imageUrl} className="w-full h-full object-cover opacity-60 group-hover:scale-110 transition-transform duration-500" alt="Receita" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent flex flex-col justify-end p-4">
+                                <Badge color={req.status === 'ILLEGIBLE' ? 'red' : (req.quotes?.some(q => q.pharmacyId === pharmacyId) ? 'green' : (req.status === 'UNDER_REVIEW' ? 'yellow' : 'blue'))} className="mb-1 w-fit">
+                                    {req.status === 'ILLEGIBLE' ? 'RECUSADA' : (req.quotes?.some(q => q.pharmacyId === pharmacyId) ? 'RESPONDIDA' : (req.status === 'UNDER_REVIEW' ? 'ANALISAR LETRA' : 'DAR PREÇOS'))}
+                                </Badge>
+                                <div className="text-white/70 text-[9px] font-black uppercase">{req.date}</div>
                             </div>
-                            <div className="p-6">
-                                <p className="text-sm text-gray-500 line-clamp-2 italic mb-4">"{req.notes || 'Sem observações.'}"</p>
-                                <Button onClick={() => handleOpenAnalysis(req)} className="w-full py-4 font-black shadow-lg">Analisar & Cotar</Button>
-                            </div>
-                        </Card>
-                    );
-                })}
+                        </div>
+                        <div className="p-5 flex-1 flex flex-col">
+                            <p className="text-xs font-bold text-gray-700 mb-4 line-clamp-2 italic leading-relaxed">{req.notes && req.notes.includes('[') ? req.notes : (req.ai_metadata?.extracted_text || 'Análise Pendente...')}</p>
+                            <Button onClick={() => handleOpenAnalysis(req)} className={`w-full py-3 font-black text-xs uppercase mt-auto ${req.status === 'UNDER_REVIEW' ? 'bg-orange-500 hover:bg-orange-600' : ''}`}>
+                                {viewMode === 'ANSWERED' ? 'VER REGISTO' : (req.status === 'UNDER_REVIEW' ? 'CORRIGIR E VALIDAR' : 'VER E COTAR')}
+                            </Button>
+                        </div>
+                    </Card>
+                ))}
             </div>
 
             {analysisMode && (
                 <div className="fixed inset-0 z-[200] flex flex-col bg-white animate-fade-in">
-                    <div className="p-4 sm:p-6 border-b flex justify-between items-center bg-gray-50 shrink-0">
-                        <div className="flex items-center gap-4 min-w-0">
-                            <h3 className="font-black text-base sm:text-xl text-gray-800 uppercase tracking-tight truncate">Análise de Receita Digital</h3>
+                    <div className="p-4 border-b flex justify-between items-center bg-gray-50">
+                        <div className="flex items-center gap-3">
+                             <div className="p-2 bg-emerald-100 text-emerald-700 rounded-xl"><Calculator size={18}/></div>
+                             <div><h3 className="font-black text-sm text-gray-800 uppercase">Cotação de Receita</h3>{customerContact && <p className="text-[10px] text-gray-500 font-bold"><User size={10} className="inline mr-1"/> {customerContact.name}</p>}</div>
                         </div>
-                        <button onClick={() => setAnalysisMode(null)} className="p-2 sm:p-3 hover:bg-gray-200 rounded-full transition-colors shrink-0" disabled={isSending}><X size={24}/></button>
+                        <button onClick={() => setAnalysisMode(null)} className="p-2 hover:bg-gray-200 rounded-full transition-colors"><X size={20}/></button>
                     </div>
                     
                     <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-                        <div className="md:w-1/2 bg-gray-950 flex items-center justify-center p-4 relative overflow-hidden">
-                            <img src={analysisMode.imageUrl} className="max-h-full max-w-full object-contain shadow-2xl animate-scale-in" />
+                        <div className="md:w-1/2 bg-black flex items-center justify-center p-4 relative overflow-hidden group">
+                            <img src={analysisMode.imageUrl} className="max-h-full max-w-full object-contain cursor-zoom-in transition-transform duration-300 hover:scale-[2.0]" alt="Receita" />
                         </div>
 
-                        <div className="flex-1 p-4 sm:p-8 overflow-y-auto bg-white border-l custom-scrollbar">
-                            {analysisStep === 'DECISION' && (
-                                <div className="max-w-md mx-auto space-y-8 pt-10">
-                                    <h4 className="text-xl sm:text-2xl font-black text-gray-800 text-center">O que você identificou?</h4>
-                                    <div className="space-y-4">
-                                        <button onClick={() => setAnalysisStep('LEGIBLE')} className="w-full p-6 sm:p-8 border-2 border-emerald-100 rounded-[32px] flex items-center gap-6 bg-emerald-50 text-emerald-800 font-black hover:border-emerald-500 transition-all group shadow-sm">
-                                            <div className="p-4 bg-emerald-600 text-white rounded-2xl group-hover:scale-110 transition-transform"><Check size={28}/></div>
-                                            <div className="text-left"><p className="text-lg">Imagem Legível</p><p className="text-xs opacity-60 font-medium">Prosseguir para cotação.</p></div>
-                                        </button>
-                                        <button onClick={() => handleReject('Imagem ilegível')} className="w-full p-6 sm:p-8 border-2 border-red-100 rounded-[32px] flex items-center gap-6 bg-red-50 text-red-800 font-black hover:border-red-500 transition-all group shadow-sm">
-                                            <div className="p-4 bg-red-600 text-white rounded-2xl group-hover:scale-110 transition-transform"><AlertTriangle size={28}/></div>
-                                            <div className="text-left"><p className="text-lg">Ilegível / Inválida</p><p className="text-xs opacity-60 font-medium">Recusar solicitação.</p></div>
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
+                        <div className="flex-1 p-6 overflow-y-auto custom-scrollbar bg-white">
+                            {analysisMode.notes && <div className="mb-6 p-4 bg-blue-50 border-l-4 border-blue-500 rounded-r-xl text-xs font-bold text-blue-800">Nota: {analysisMode.notes}</div>}
 
-                            {analysisStep === 'LEGIBLE' && (
-                                <div className="space-y-8 animate-fade-in">
-                                    <div className="bg-gray-50 p-6 rounded-3xl border space-y-4">
-                                        <div className="grid grid-cols-12 gap-3">
-                                            <div className="col-span-12 sm:col-span-6">
-                                                <div className="relative">
-                                                    <input className="w-full p-3 border rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-emerald-500" placeholder="Busque no stock..." value={newItem.name} onFocus={() => setShowSuggestions(true)} onChange={e => { setNewItem({...newItem, name: e.target.value}); setShowSuggestions(true); }} />
-                                                    {showSuggestions && stockSuggestions.length > 0 && (
-                                                        <div className="absolute top-full left-0 w-full bg-white border border-emerald-200 rounded-2xl shadow-2xl mt-1 z-[250] overflow-hidden animate-scale-in">
-                                                            {stockSuggestions.map(s => (
-                                                                <div key={s.id} onClick={() => selectFromStock(s)} className="p-3 hover:bg-emerald-50 cursor-pointer border-b last:border-0 flex justify-between items-center group">
-                                                                    <div className="flex-1"><p className="text-sm font-bold text-gray-800">{formatProductNameForCustomer(s.name)}</p></div>
-                                                                    <p className="text-sm font-black text-emerald-600">Kz {s.price.toLocaleString()}</p>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                            <div className="col-span-4 sm:col-span-2">
-                                                <input type="number" className="w-full p-3 border rounded-xl font-bold text-sm text-center" value={newItem.qty} onChange={e => setNewItem({...newItem, qty: Number(e.target.value)})}/>
-                                            </div>
-                                            <div className="col-span-8 sm:col-span-3">
-                                                <input type="number" className="w-full p-3 border rounded-xl font-black text-sm text-emerald-600" value={newItem.price} onChange={e => setNewItem({...newItem, price: Number(e.target.value)})}/>
-                                            </div>
-                                            <div className="col-span-12 sm:col-span-1">
-                                                <button onClick={addItemToQuote} className="w-full h-[46px] bg-emerald-600 text-white rounded-xl flex items-center justify-center shadow-lg hover:bg-emerald-700 transition-colors"><Plus size={24}/></button>
-                                            </div>
-                                        </div>
-                                        <div className="space-y-2 mt-4">
-                                            {quoteItems.map((it, idx) => (
-                                                <div key={idx} className="flex justify-between items-center p-4 bg-white border rounded-2xl shadow-sm">
-                                                    <span className="font-bold text-gray-700 text-sm">{it.quantity}x {it.name}</span>
-                                                    <div className="flex items-center gap-4">
-                                                        <span className="font-black text-emerald-600 text-sm">Kz {(it.price * it.quantity).toLocaleString()}</span>
-                                                        <button onClick={() => setQuoteItems(quoteItems.filter((_, i) => i !== idx))} className="text-red-300 hover:text-red-500"><Trash2 size={18}/></button>
+                            {!isReadOnly ? (
+                                <>
+                                    <div className="space-y-3 mb-6">
+                                        {quoteItems.map((it: any, idx) => (
+                                            <div key={idx} className={`flex items-center gap-2 p-3 bg-white border rounded-2xl shadow-sm ${it.productId ? 'border-emerald-200 bg-emerald-50/30' : 'border-gray-200'}`}>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex justify-between mb-1">
+                                                        <label className="text-[8px] font-black text-gray-400 uppercase">Medicamento</label>
+                                                        {it.productId ? <span className="text-[8px] font-black text-emerald-600 flex items-center gap-1"><CheckCircle2 size={8}/> STOCK ({it.unitType?.toUpperCase()}) {it.currentStock < 5 && <span className="text-red-500">POUCO STOCK</span>}</span> : <span className="text-[8px] font-black text-orange-400 flex items-center gap-1"><AlertTriangle size={8}/> MANUAL (NÃO BAIXA STOCK)</span>}
                                                     </div>
+                                                    <input className="w-full bg-transparent border-none outline-none font-bold text-gray-800 text-sm uppercase truncate" value={it.name} onChange={e => { const updated = [...quoteItems]; updated[idx].name = e.target.value; updated[idx].productId = undefined; setQuoteItems(updated); }} />
                                                 </div>
-                                            ))}
+                                                <div className="w-16">
+                                                    <label className="text-[8px] font-black text-gray-400 uppercase mb-0.5 text-center block">Qtd</label>
+                                                    <input type="number" className="w-full p-2 bg-gray-50 border rounded-lg font-black text-center text-xs" value={it.quantity} onChange={e => { const updated = [...quoteItems]; updated[idx].quantity = Number(e.target.value); setQuoteItems(updated); }} />
+                                                </div>
+                                                <div className="w-24">
+                                                    <label className="text-[8px] font-black text-gray-400 uppercase mb-0.5 text-center block">Preço Unit.</label>
+                                                    <input type="number" className="w-full p-2 bg-emerald-50 border border-emerald-100 rounded-lg font-black text-center text-emerald-700 text-xs" value={it.price} onChange={e => { const updated = [...quoteItems]; updated[idx].price = Number(e.target.value); setQuoteItems(updated); }} />
+                                                </div>
+                                                <button onClick={() => setQuoteItems(quoteItems.filter((_, i) => i !== idx))} className="text-gray-300 hover:text-red-500 p-2"><Trash2 size={16}/></button>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    <div className="flex justify-between items-center bg-gray-50 p-4 rounded-2xl border border-gray-200 mb-6 font-black uppercase text-xs">
+                                        <div className="flex items-center gap-2 text-gray-500"><Calculator size={18}/> Total Cotação</div>
+                                        <span className="text-xl text-emerald-600">Kz {totalQuoteValue.toLocaleString()}</span>
+                                    </div>
+
+                                    <div className="pt-4 border-t border-gray-100 mb-6">
+                                        <div className="flex gap-2">
+                                            <div className="relative flex-1">
+                                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" size={16}/>
+                                                <input className="w-full pl-10 pr-4 py-3 bg-gray-50 rounded-xl outline-none font-bold text-sm uppercase" placeholder="Procurar no seu stock..." value={newItem.name} onFocus={() => setShowSuggestions(true)} onChange={e => setNewItem({...newItem, name: e.target.value})} />
+                                                {showSuggestions && stockSuggestions.length > 0 && (
+                                                    <div className="absolute top-full left-0 w-full bg-white border rounded-xl shadow-xl mt-1 z-50 max-h-56 overflow-y-auto">
+                                                        {stockSuggestions.map(s => (
+                                                            <div key={s.id} onClick={() => selectFromStock(s)} className="p-3 hover:bg-emerald-50 cursor-pointer border-b flex justify-between items-center group">
+                                                                <div><span className="text-xs font-bold block group-hover:text-emerald-700">{formatProductNameForCustomer(s.name)}</span><div className="flex gap-2"><span className="text-[9px] font-bold text-gray-400 bg-gray-100 px-1 rounded">{s.unitType || 'Unidade'}</span>{s.stock < 10 && <span className="text-[9px] font-black text-red-500 uppercase">Fim de Stock ({s.stock})</span>}</div></div>
+                                                                <span className="text-[10px] font-black text-emerald-600">Kz {s.price.toLocaleString()}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <input type="number" className="w-16 py-3 px-1 bg-gray-50 rounded-xl outline-none font-black text-center text-sm" placeholder="Qtd" value={newItem.qty} onChange={e => setNewItem({...newItem, qty: Number(e.target.value)})} />
+                                            <input type="number" className="w-24 py-3 px-2 bg-gray-50 rounded-xl outline-none font-black text-center text-sm" placeholder="Preço" value={newItem.price} onChange={e => setNewItem({...newItem, price: e.target.value})} />
+                                            <button onClick={addItemToQuote} className="p-3 bg-emerald-600 text-white rounded-xl shadow-lg active:scale-95 transition-transform"><Plus size={20}/></button>
                                         </div>
                                     </div>
 
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-6 border-t">
-                                        <div className="text-center sm:text-left">
-                                            <p className="text-[10px] font-black text-gray-400 uppercase">Total do Orçamento</p>
-                                            <p className="text-3xl font-black text-emerald-600">Kz {(quoteItems.reduce((acc, i) => acc + (i.price * i.quantity), 0) + deliveryFee).toLocaleString()}</p>
-                                        </div>
-                                        <div className="flex gap-3">
-                                            <Button variant="outline" onClick={() => setAnalysisStep('DECISION')} className="flex-1 px-8 font-bold" disabled={isSending}>Voltar</Button>
-                                            <Button onClick={handleSendQuote} disabled={quoteItems.length === 0 || isSending} className="flex-[2] px-12 font-black text-lg bg-emerald-600 shadow-xl">
-                                                {isSending ? <Loader2 className="animate-spin" /> : <Send size={20}/>} {isSending ? 'Enviando...' : 'Enviar'}
-                                            </Button>
-                                        </div>
+                                    <textarea className="w-full p-4 bg-gray-50 border rounded-2xl outline-none text-sm h-20 mb-6 font-medium" placeholder="Notas para o utente (Ex: Temos genérico)..." value={quoteNotes} onChange={e => setQuoteNotes(e.target.value)} />
+
+                                    <div className="flex gap-3">
+                                        <button onClick={handleMarkIllegible} disabled={isSending} className="flex-1 py-4 bg-red-50 text-red-500 rounded-xl font-black text-xs uppercase hover:bg-red-500 hover:text-white transition-all border border-red-100">Rejeitar Ilegível</button>
+                                        <Button onClick={handleValidateAndSend} disabled={quoteItems.length === 0 || isSending} className="flex-[2] py-4 bg-emerald-600 shadow-xl font-black text-sm rounded-xl uppercase text-white">
+                                            {isSending ? <Loader2 className="animate-spin" /> : "Enviar Orçamento"}
+                                        </Button>
                                     </div>
-                                </div>
+                                </>
+                            ) : (
+                                <div className="p-12 text-center border-2 border-dashed border-emerald-200 bg-emerald-50 rounded-[40px]"><CheckCircle2 size={60} className="mx-auto mb-4 text-emerald-500"/><h4 className="font-black uppercase text-xl text-emerald-900">Processado com Sucesso</h4><p className="text-emerald-700 font-bold mt-2">O cliente já recebeu a sua resposta.</p></div>
                             )}
                         </div>
                     </div>

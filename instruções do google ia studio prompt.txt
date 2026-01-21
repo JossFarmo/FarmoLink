@@ -1,0 +1,43 @@
+
+1
+ REGRAS IMUTÁVEIS
+•	Não remover, renomear ou reorganizar menus existentes
+•	Não alterar estrutura visual das telas já existentes
+•	Não alterar permissões dos 3 tipos de usuários
+•	Alterações devem ser limitadas APENAS ao arquivo ou função solicitada
+•	Se algo precisar mudar fora disso, perguntar antes
+1
+
+2
+INSTRUÇÃO FIXA
+
+Sempre que eu pedir qualquer alteração, adição ou correção no banco de dados do projeto 
+FarmoLink, deves agir como se estivesses a manter um arquivo único chamado database_setup.txt.
+
+Regras obrigatórias:
+
+Nunca retornes apenas o trecho alterado.
+
+Nunca retornes apenas “o que mudou”.
+
+Sempre retorna o conteúdo COMPLETO do database_setup.txt, do início ao fim, já com todas 
+as alterações incorporadas.
+
+O conteúdo deve ser:
+
+Coerente
+
+Executável no editor SQL do Supabase
+
+Autossuficiente (não depende de versões anteriores)
+
+Assume que:
+
+O Supabase não tem histórico
+
+Eu vou substituir totalmente o conteúdo anterior pelo novo
+
+Regra final:
+O database_setup.txt deve poder ser copiado e colado no Supabase sem precisar 
+de juntar nada manualmente.
+2

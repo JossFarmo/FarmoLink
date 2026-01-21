@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { UserRole, User } from '../types';
 import { signInUser, signUpUser, signUpPartner, resetPassword, updateUserPassword } from '../services/dataService';
 import { Button } from './UI';
-import { Mail, Lock, User as UserIcon, ArrowRight, AlertTriangle, Info, ArrowLeft, Briefcase, Phone, Heart, CheckCircle } from 'lucide-react';
+import { Mail, Lock, User as UserIcon, ArrowRight, AlertTriangle, Info, ArrowLeft, Briefcase, Phone, Heart, CheckCircle, ShieldCheck } from 'lucide-react';
 import { playSound, playWelcomeMessage } from '../services/soundService';
 
 interface AuthProps {
@@ -12,7 +12,6 @@ interface AuthProps {
 
 const LOGO_URL = "https://res.cloudinary.com/dzvusz0u4/image/upload/v1765977310/wrzwildc1kqsq5skklio.png";
 
-// --- NOVO COMPONENTE: Tela de Definição de Nova Senha ---
 export const UpdatePasswordView: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
     const [password, setPassword] = useState('');
     const [confirm, setConfirm] = useState('');
@@ -86,7 +85,8 @@ export const AuthView: React.FC<AuthProps> = ({ onLogin }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [phone, setPhone] = useState(''); // Estado para telefone
+  const [phone, setPhone] = useState(''); 
+  const [pdpaConsent, setPdpaConsent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -96,6 +96,12 @@ export const AuthView: React.FC<AuthProps> = ({ onLogin }) => {
     setLoading(true);
     setErrorMsg(null);
     setSuccessMsg(null);
+
+    if (!isLoginMode && !isResetMode && !pdpaConsent) {
+        setErrorMsg('É necessário aceitar o processamento de dados para continuar.');
+        setLoading(false);
+        return;
+    }
 
     if (!email.includes('@') || !email.includes('.')) {
        setErrorMsg('Por favor, insira um endereço de e-mail válido.');
@@ -122,16 +128,14 @@ export const AuthView: React.FC<AuthProps> = ({ onLogin }) => {
       result = await signInUser(email.trim(), password);
     } else {
       if (isPartnerMode) {
-         // Passando telefone no cadastro de parceiro
          result = await signUpPartner(name, email.trim(), password, phone);
       } else {
-         // Passando telefone no cadastro de cliente
          result = await signUpUser(name, email.trim(), password, UserRole.CUSTOMER, phone);
       }
     }
 
     if (result.user) {
-      playWelcomeMessage(result.user.name); // Passa o nome do usuário para o áudio
+      playWelcomeMessage(result.user.name); 
       onLogin(result.user);
     } else {
       playSound('error');
@@ -149,6 +153,7 @@ export const AuthView: React.FC<AuthProps> = ({ onLogin }) => {
     setPassword('');
     setName('');
     setPhone('');
+    setPdpaConsent(false);
     playSound('click');
   };
 
@@ -161,6 +166,7 @@ export const AuthView: React.FC<AuthProps> = ({ onLogin }) => {
     setEmail('');
     setPassword('');
     setPhone('');
+    setPdpaConsent(false);
     playSound('click');
   }
 
@@ -175,10 +181,8 @@ export const AuthView: React.FC<AuthProps> = ({ onLogin }) => {
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 font-sans">
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-gray-100">
         
-        {/* Header Visual - FarmoLink Original */}
         <div className={`p-8 text-center transition-colors duration-500 ${isPartnerMode && !isLoginMode ? 'bg-blue-800' : 'bg-emerald-600'}`}>
           <div className="flex justify-center mb-6">
-             {/* AUMENTADO: w-24 h-24 */}
              <div className="bg-white p-4 rounded-3xl shadow-xl">
                 <img src={LOGO_URL} className="h-24 w-24 object-contain" alt="Logo" />
              </div>
@@ -198,7 +202,7 @@ export const AuthView: React.FC<AuthProps> = ({ onLogin }) => {
               )}
             </h2>
             {isResetMode && <p className="text-gray-500 text-sm mt-1">Digite seu e-mail para receber um link de redefinição.</p>}
-            {isPartnerMode && !isLoginMode && <p className="text-gray-500 text-sm mt-1">Crie sua conta. Após aprovação do administrador, você poderá configurar sua farmácia.</p>}
+            {isPartnerMode && !isLoginMode && <p className="text-gray-500 text-sm mt-1">Crie sua conta. Após aprovação, você poderá configurar sua farmácia.</p>}
           </div>
 
           {errorMsg && (
@@ -217,7 +221,6 @@ export const AuthView: React.FC<AuthProps> = ({ onLogin }) => {
 
           <form onSubmit={handleAuth} className="space-y-4">
             
-            {/* Nome (Apenas Cadastro) */}
             {!isLoginMode && !isResetMode && (
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -234,7 +237,6 @@ export const AuthView: React.FC<AuthProps> = ({ onLogin }) => {
               </div>
             )}
 
-            {/* Telefone (Apenas Cadastro) */}
             {!isLoginMode && !isResetMode && (
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -251,7 +253,6 @@ export const AuthView: React.FC<AuthProps> = ({ onLogin }) => {
               </div>
             )}
 
-            {/* Email */}
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Mail className="h-5 w-5 text-gray-400" />
@@ -266,7 +267,6 @@ export const AuthView: React.FC<AuthProps> = ({ onLogin }) => {
               />
             </div>
 
-            {/* Senha */}
             {!isResetMode && (
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -281,6 +281,21 @@ export const AuthView: React.FC<AuthProps> = ({ onLogin }) => {
                   onChange={(e) => setPassword(e.target.value)}
                 />
               </div>
+            )}
+
+            {!isLoginMode && !isResetMode && (
+                <div className="flex items-start gap-2 bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                    <input 
+                        type="checkbox" 
+                        id="pdpa" 
+                        className="mt-1 h-4 w-4 rounded text-emerald-600"
+                        checked={pdpaConsent}
+                        onChange={e => setPdpaConsent(e.target.checked)}
+                    />
+                    <label htmlFor="pdpa" className="text-[10px] text-gray-500 leading-tight">
+                        Autorizo o processamento dos meus dados pessoais e de saúde pela FarmoLink, conforme a <strong>Lei de Proteção de Dados de Angola (APD)</strong>.
+                    </label>
+                </div>
             )}
 
             {isLoginMode && !isResetMode && (
@@ -329,7 +344,6 @@ export const AuthView: React.FC<AuthProps> = ({ onLogin }) => {
                 {isLoginMode ? 'Criar conta de Cliente' : 'Fazer Login'}
               </button>
 
-              {/* Link DISCRETO para Farmácias */}
               {!isPartnerMode && (
                   <div className="mt-4 pt-4 border-t border-gray-100">
                     <button 
