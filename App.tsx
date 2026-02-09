@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { User, UserRole, Product, Pharmacy, Order, OrderStatus, PrescriptionRequest, CartItem } from './types';
-import { MainLayout } from './components/Layout';
+import { MainLayout } from './components/Layout.tsx';
 import { AuthView } from './components/Auth';
 import { LandingPage } from './components/LandingPage';
 import { LoadingOverlay, Button } from './components/UI';
