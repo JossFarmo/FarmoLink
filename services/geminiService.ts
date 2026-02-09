@@ -1,77 +1,109 @@
 
-import { Product, GlobalProduct } from '../types';
+import { supabase } from './supabaseClient';
+import { PrescriptionRequest } from '../types';
 
-const normalizeString = (str: string) => {
-    return str
-        .toLowerCase()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9\s()]/g, "") 
-        .replace(/\s+/g, " ")
-        .trim();
+/**
+ * FarmoLink AI Service - Production Bridge
+ */
+
+export const checkAiHealth = async (): Promise<boolean> => {
+    try {
+        const { data, error } = await supabase.functions.invoke('gemini', { body: { action: 'ping' } });
+        if (error) return false;
+        return data?.status === 'ok';
+    } catch { return false; }
 };
 
-export const formatProductNameForCustomer = (fullName: string): string => {
-    if (!fullName || !fullName.includes(',')) return fullName;
-    const parts = fullName.split(',').map(p => p.trim());
-    if (parts.length < 2) return fullName;
-    const nameWithDci = parts[0];
-    const cleanName = nameWithDci.replace(/\s*\([^)]*\)/g, '').trim();
-    const displayParts = [cleanName];
-    if (parts[1]) displayParts.push(parts[1]); 
-    if (parts[2]) displayParts.push(parts[2]); 
-    return displayParts.join(', ');
+export const fetchChatHistory = async (userId: string) => {
+    const { data } = await supabase
+        .from('bot_conversations')
+        .select('role, content')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true });
+    return data || [];
 };
 
-// NOTE:
-// The askFarmoBot logic was moved to a serverless function (`/api/genai`) to avoid
-// bundling the `@google/genai` SDK into the client. Keep only client-safe helpers here.
+export const saveChatMessage = async (userId: string, role: 'user' | 'model', content: string) => {
+    await supabase.from('bot_conversations').insert([{ user_id: userId, role, content }]);
+};
 
-export interface ProcessedImportItem {
-    name: string;
-    description: string;
-    price: number;
-    stock: number;
-    category: string;
-    action: 'CREATE' | 'UPDATE' | 'IGNORE';
-    matchId?: string;
-    referencePrice?: number;
-}
+export const getChatSession = () => {
+    return {
+        sendMessage: async ({ message, userName, history, userId }: { message: string, userName?: string, history?: any[], userId: string }) => {
+            try {
+                // Simplificado ao máximo para evitar erro 400 de sintaxe/RLS
+                const { data: products } = await supabase
+                    .from('products')
+                    .select('name, price')
+                    .limit(5);
 
-export const processBulkImportForPharmacy = async (text: string, globalCatalog: GlobalProduct[]): Promise<ProcessedImportItem[]> => {
-    const lines = text.split('\n').filter(line => line.trim() !== '');
-    return lines.map(line => {
-        const priceMatch = line.match(/kz\s*(\d+)/i);
-        const price = priceMatch ? parseInt(priceMatch[1]) : 0;
-        const cleanLine = line.replace(/kz\s*\d+/i, '').trim();
-        const match = globalCatalog.find(g => normalizeString(g.name) === normalizeString(cleanLine));
+                const { data, error } = await supabase.functions.invoke('gemini', {
+                    body: { 
+                        action: 'chat', 
+                        message,
+                        userName,
+                        history: history?.map(h => ({ role: h.role, content: h.text || h.content })),
+                        productsContext: products?.map(p => ({ item: p.name, price: p.price }))
+                    }
+                });
+
+                if (error) {
+                    // Extrai detalhes se a função retornar erro 500 com corpo JSON
+                    const errorDetails = error.context?.message || error.message;
+                    console.error("Erro na Edge Function:", errorDetails);
+                    throw new Error(errorDetails);
+                }
+
+                if (data?.error) throw new Error(data.details || data.error);
+                
+                // Salva histórico de forma assíncrona
+                saveChatMessage(userId, 'user', message);
+                saveChatMessage(userId, 'model', data.text);
+
+                return { text: data.text };
+            } catch (error: any) {
+                console.error("Falha Crítica FarmoBot:", error.message);
+                return { text: `Desculpe, tive um problema técnico: ${error.message}. Por favor, tente novamente daqui a pouco.` };
+            }
+        }
+    };
+};
+
+export const analyzePrescriptionVision = async (imageUrl: string): Promise<PrescriptionRequest['ai_metadata']> => {
+    try {
+        let optimizedUrl = imageUrl;
+        if (imageUrl.includes('cloudinary')) {
+            optimizedUrl = imageUrl.replace('/upload/', '/upload/w_1200,q_auto:eco,f_auto/');
+        }
+
+        const { data, error } = await supabase.functions.invoke('gemini', {
+            body: { action: 'vision', imageUrl: optimizedUrl }
+        });
+
+        if (error) throw error;
+        if (!data || data.error) throw new Error(data?.details || "Erro no processamento da imagem.");
+
         return {
-            name: cleanLine,
-            description: cleanLine,
-            price: price,
-            stock: 10,
-            category: match?.category || "Outros",
-            action: 'CREATE',
-            matchId: match?.id,
-            referencePrice: match?.referencePrice
+            confidence: data.confidence ?? 0.0,
+            extracted_text: data.extracted_text || "Texto não identificado.",
+            is_validated: false,
+            suggested_items: data.suggested_items || []
         };
-    });
+    } catch (err: any) {
+        console.error("Erro Vision IA:", err.message);
+        return { 
+            confidence: 0, 
+            extracted_text: "Não foi possível ler automaticamente a receita. Por favor, descreva os medicamentos nas observações.", 
+            is_validated: false, 
+            suggested_items: [] 
+        };
+    }
 };
 
-// Fix: Adicionada a função ausente para importação do catálogo mestre (Admin) para resolver erro de importação no AdminCatalogView.tsx
-export const processBulkImportForMasterData = async (text: string): Promise<ProcessedImportItem[]> => {
-    const lines = text.split('\n').filter(line => line.trim() !== '');
-    return lines.map(line => {
-        const priceMatch = line.match(/kz\s*(\d+)/i);
-        const price = priceMatch ? parseInt(priceMatch[1]) : 0;
-        const cleanLine = line.replace(/kz\s*\d+/i, '').trim();
-        return {
-            name: cleanLine,
-            description: cleanLine,
-            price: 0,
-            stock: 0,
-            category: "Outros / Uso Especial",
-            action: 'CREATE',
-            referencePrice: price
-        };
-    });
+export const standardizeProductVoice = async (text: string) => {
+    return { name: text, price: 0 };
+};
+
+export const formatProductNameForCustomer = (name: string): string => {
+    return name.replace(/[\(\)].*?[\(\)]/g, '').trim();
 };

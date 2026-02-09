@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Button, Badge } from '../components/UI';
-import { User } from '../types';
+import { User, UserRole } from '../types';
 import { createSupportTicket, fetchUserTickets, fetchTicketMessages, sendTicketMessage } from '../services/dataService';
-import { MessageCircle, Mail, HelpCircle, Send, Clock, ChevronRight, X, User as UserIcon, ShieldCheck, Lock, CheckCircle } from 'lucide-react';
+import { MessageCircle, Mail, HelpCircle, Send, Clock, ChevronRight, X, User as UserIcon, ShieldCheck, Lock, CheckCircle, Loader2 } from 'lucide-react';
 import { playSound } from '../services/soundService';
 
 export const SupportView = ({ user }: { user: User }) => {
@@ -52,6 +52,7 @@ export const SupportView = ({ user }: { user: User }) => {
 
     const handleStartTicket = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!subject || !initialMessage) return;
         setLoading(true);
         const success = await createSupportTicket(user.id, user.name, user.email, subject, initialMessage);
         setLoading(false);
@@ -67,7 +68,7 @@ export const SupportView = ({ user }: { user: User }) => {
         if (!newMessage.trim() || !activeTicket) return;
         const msg = newMessage;
         setNewMessage('');
-        const success = await sendTicketMessage(activeTicket.id, user.id, user.name, 'CUSTOMER', msg);
+        const success = await sendTicketMessage(activeTicket.id, user.id, user.name, user.role, msg);
         if (success) {
             loadMessages();
             playSound('click');
@@ -98,18 +99,19 @@ export const SupportView = ({ user }: { user: User }) => {
                 >
                     {messages.map((m, idx) => {
                         const isSystem = m.message.includes('---');
+                        const isMe = m.sender_id === user.id;
                         return (
-                            <div key={idx} className={`flex ${m.sender_role === 'ADMIN' ? 'justify-start' : 'justify-end'}`}>
+                            <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
                                 <div className={`max-w-[85%] p-4 rounded-3xl text-sm shadow-sm ${
                                     isSystem ? 'mx-auto text-center bg-gray-800 text-gray-400 font-black !text-[9px] px-6 py-2 rounded-full !shadow-none' :
-                                    m.sender_role === 'ADMIN' 
+                                    !isMe 
                                     ? 'bg-white text-gray-800 border-emerald-500 border-l-4 rounded-tl-none' 
                                     : 'bg-emerald-600 text-white rounded-tr-none'
                                 }`}>
                                     {!isSystem && (
                                         <div className="flex items-center gap-2 mb-1">
                                             <span className="text-[9px] font-black uppercase tracking-tighter opacity-60">
-                                                {m.sender_role === 'ADMIN' ? 'Suporte FarmoLink' : 'Você'}
+                                                {isMe ? 'Você' : m.sender_name}
                                             </span>
                                         </div>
                                     )}
@@ -150,8 +152,8 @@ export const SupportView = ({ user }: { user: User }) => {
     return (
         <div className="max-w-4xl mx-auto space-y-8 animate-fade-in pb-20">
             <div className="text-center">
-                <h1 className="text-3xl font-black text-gray-800">Centro de Ajuda</h1>
-                <p className="text-gray-500 mt-2">Estamos aqui para resolver qualquer problema com sua saúde ou pedidos.</p>
+                <h1 className="text-3xl font-black text-gray-800">Centro de Suporte</h1>
+                <p className="text-gray-500 mt-2">Estamos aqui para resolver qualquer problema com a plataforma.</p>
             </div>
 
             <div className="grid md:grid-cols-3 gap-6">
@@ -166,7 +168,7 @@ export const SupportView = ({ user }: { user: User }) => {
 
                 <div className="md:col-span-2 space-y-4">
                     <h4 className="font-black text-xs uppercase tracking-widest text-gray-400 flex items-center gap-2 px-2">
-                        <Clock size={14}/> Meus Atendimentos
+                        <Clock size={14}/> Meus Chamados
                     </h4>
                     {tickets.length === 0 && !loading ? (
                         <div className="bg-white p-12 rounded-[40px] border border-dashed text-center flex flex-col items-center">
@@ -181,7 +183,7 @@ export const SupportView = ({ user }: { user: User }) => {
                                 className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm hover:shadow-xl transition-all cursor-pointer flex items-center justify-between group"
                             >
                                 <div className="flex items-center gap-4">
-                                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${t.status === 'OPEN' ? 'bg-emerald-50 text-emerald-600' : 'bg-gray-100 text-gray-400'}`}>
+                                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black shrink-0 ${t.status === 'OPEN' ? 'bg-emerald-50 text-emerald-600' : 'bg-gray-100 text-gray-400'}`}>
                                         <MessageCircle size={24}/>
                                     </div>
                                     <div>
@@ -203,7 +205,7 @@ export const SupportView = ({ user }: { user: User }) => {
                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-md">
                     <Card className="w-full max-w-lg p-8 animate-scale-in">
                         <div className="flex justify-between items-center mb-8">
-                            <h3 className="font-black text-2xl text-gray-800">Abrir Novo Chamado</h3>
+                            <h3 className="font-black text-2xl text-gray-800">Novo Chamado</h3>
                             <button onClick={() => setView('LIST')} className="p-2 hover:bg-gray-100 rounded-full"><X/></button>
                         </div>
                         <form onSubmit={handleStartTicket} className="space-y-4">
@@ -211,18 +213,29 @@ export const SupportView = ({ user }: { user: User }) => {
                                 <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Assunto</label>
                                 <select className="w-full p-4 bg-gray-50 border rounded-2xl outline-none font-bold" value={subject} onChange={e => setSubject(e.target.value)} required>
                                     <option value="">Selecione...</option>
-                                    <option value="Problema com Pedido">Problema com Pedido</option>
-                                    <option value="Erro no Sistema">Erro no Sistema</option>
-                                    <option value="Dúvida Financeira">Dúvida Financeira</option>
-                                    <option value="Sugestão">Sugestão</option>
+                                    {user.role === UserRole.PHARMACY ? (
+                                        <>
+                                            <option value="Problema no Painel">Problema no Painel</option>
+                                            <option value="Dúvida com Taxas">Dúvida com Taxas</option>
+                                            <option value="Relatar Bug">Relatar Bug</option>
+                                            <option value="Solicitação de Recurso">Solicitação de Recurso</option>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <option value="Problema com Pedido">Problema com Pedido</option>
+                                            <option value="Erro no Sistema">Erro no Sistema</option>
+                                            <option value="Dúvida Financeira">Dúvida Financeira</option>
+                                            <option value="Sugestão">Sugestão</option>
+                                        </>
+                                    )}
                                 </select>
                             </div>
                             <div>
-                                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Descreva seu Problema</label>
-                                <textarea className="w-full p-4 bg-gray-50 border rounded-2xl outline-none h-32 text-sm" placeholder="Detalhes da sua solicitação..." value={initialMessage} onChange={e => setInitialMessage(e.target.value)} required />
+                                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 block">Mensagem</label>
+                                <textarea className="w-full p-4 bg-gray-50 border rounded-2xl outline-none h-32 text-sm" placeholder="Descreva seu problema..." value={initialMessage} onChange={e => setInitialMessage(e.target.value)} required />
                             </div>
-                            <Button type="submit" disabled={loading} className="w-full py-4 font-black text-lg shadow-xl shadow-emerald-500/20">
-                                {loading ? 'Enviando...' : 'Iniciar Atendimento'}
+                            <Button type="submit" disabled={loading} className="w-full py-4 font-black">
+                                {loading ? <Loader2 className="animate-spin" /> : 'Enviar Chamado'}
                             </Button>
                         </form>
                     </Card>

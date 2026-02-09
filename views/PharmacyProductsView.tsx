@@ -1,308 +1,315 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Card, Badge, Button, Toast } from '../components/UI';
-import { Product, PRODUCT_CATEGORIES, GlobalProduct } from '../types';
-import { Plus, XCircle, Edit2, Trash2, Search, Save, AlertTriangle, FileText, UploadCloud, ArrowRight, CheckCircle2, Loader2, X, ImageIcon, Link2 } from 'lucide-react';
-import { addProduct, updateProduct, bulkDeletePharmacyProducts, fetchGlobalCatalog, bulkAddPharmacyProducts } from '../services/productService';
-import { processBulkImportForPharmacy, ProcessedImportItem } from '../services/geminiService';
+import { Product, PRODUCT_CATEGORIES, GlobalProduct, ProductUnitType, UNIT_TYPES } from '../types';
+import { 
+    Plus, XCircle, Edit2, Trash2, Search, Save, AlertTriangle, FileText, UploadCloud, 
+    ArrowRight, CheckCircle2, Loader2, X, ImageIcon, Link2, Info, Package, 
+    ChevronRight, ChevronLeft, ArrowUp, ArrowDown, Database, RefreshCw, Wifi, 
+    Layers, Sparkles, ScanBarcode, ListPlus, Boxes, ChevronDown, AlertOctagon
+} from 'lucide-react';
+import { 
+    addProduct, updateProduct, bulkDeletePharmacyProducts, 
+    fetchGlobalCatalog, bulkAddPharmacyProducts, fetchPharmacyInventory,
+    areProductNamesSimilar 
+} from '../services/productService';
 import { playSound } from '../services/soundService';
 
 const normalizeText = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const ITEMS_PER_PAGE = 50;
 
-export const PharmacyProductsView = ({ products, pharmacyId, onRefresh }: { products: Product[], pharmacyId: string, onRefresh?: () => void }) => {
-  const [isAdding, setIsAdding] = useState(false);
-  const [isBulkAdding, setIsBulkAdding] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
+// --- MÉTODOS DE REGISTO DE PRODUTOS ---
+
+// 1. IMPORTAÇÃO EM MASSA (ATUALIZADO COM DETEÇÃO DE DUPLICADOS)
+const BulkImportModal = ({ onClose, onComplete, pharmacyId, existingStock }: { onClose: () => void, onComplete: () => void, pharmacyId: string, existingStock: Product[] }) => {
+    const [step, setStep] = useState<'INPUT' | 'REVIEW'>('INPUT');
+    const [text, setText] = useState('');
+    const [items, setItems] = useState<any[]>([]);
+    const [loading, setLoading] = useState(false);
+    const listRef = useRef<HTMLDivElement>(null);
+
+    const handleAnalyze = () => {
+        if (!text.trim()) return;
+        setLoading(true);
+        
+        setTimeout(() => {
+            const lines = text.split('\n').filter(l => l.trim().length > 3);
+            const parsed = lines.map((line, idx) => {
+                const parts = line.split(/[,;\t]/).map(p => p.trim());
+                let price = 0;
+                let name = line;
+                
+                const lastPart = parts[parts.length - 1];
+                const cleanLastPart = lastPart.replace(/[^0-9.,]/g, '').replace(',', '.');
+                
+                if (!isNaN(Number(cleanLastPart)) && cleanLastPart.length > 0) {
+                    price = parseFloat(cleanLastPart);
+                    if (parts.length > 1) name = parts.slice(0, parts.length - 1).join(', ').trim();
+                    else name = line.replace(lastPart, '').trim();
+                } else {
+                    const priceMatch = line.match(/(\d[\d\s.]*)$/);
+                    if (priceMatch) {
+                        const val = priceMatch[0].replace(/[^0-9.]/g, '');
+                        price = parseFloat(val);
+                        name = line.replace(priceMatch[0], '').trim();
+                    }
+                }
+
+                name = name.replace(/,\s*$/, '').replace(/^[-]/, '').trim().toUpperCase();
+                
+                // --- CONTROLO DE DUPLICADOS (STOCK LOCAL) ---
+                const isDuplicate = existingStock.some(p => areProductNamesSimilar(p.name, name));
+
+                return { 
+                    name, 
+                    price: price || 0,
+                    stock: 50, 
+                    isDuplicate,
+                    id: Math.random().toString(36).substr(2, 9)
+                };
+            });
+
+            setItems(parsed.filter(p => p.price > 0 || p.name.length > 2));
+            setStep('REVIEW');
+            setLoading(false);
+            playSound('success');
+        }, 800);
+    };
+
+    const handleConfirm = async () => {
+        // Filtra para não importar duplicados se o usuário desejar (opcional, aqui apenas avisamos)
+        const toImport = items.filter(i => !i.isDuplicate);
+        if (toImport.length === 0 && items.length > 0) {
+            if(!confirm("Todos os itens já existem no seu stock. Deseja importar duplicados mesmo assim?")) return;
+        }
+
+        setLoading(true);
+        const payload = items.map(i => ({
+            name: i.name,
+            price: i.price,
+            stock: i.stock,
+            category: 'Geral',
+            pharmacy_id: pharmacyId,
+            requires_prescription: false,
+            unit_type: 'Unidade',
+            image: 'https://cdn-icons-png.flaticon.com/512/883/883407.png'
+        }));
+
+        const res = await bulkAddPharmacyProducts(payload);
+        setLoading(false);
+        if (res.success) { playSound('save'); onComplete(); }
+        else alert("Erro ao importar: " + res.error);
+    };
+
+    return (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="w-full max-w-5xl bg-white rounded-[32px] shadow-2xl flex flex-col h-[85vh] overflow-hidden border border-gray-100">
+                <div className="p-4 border-b flex justify-between items-center bg-white shrink-0">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-blue-50 text-blue-600 rounded-xl"><UploadCloud size={24}/></div>
+                        <div>
+                            <h2 className="text-lg font-black text-gray-800 uppercase tracking-tight">Importação de Stock</h2>
+                            <p className="text-[10px] text-gray-400 font-bold uppercase">Controlo de Duplicados Ativo</p>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full"><X size={24}/></button>
+                </div>
+
+                <div className="flex-1 overflow-hidden relative flex flex-col bg-gray-50/50">
+                    {step === 'INPUT' ? (
+                        <div className="flex-1 flex flex-col p-6 h-full overflow-hidden">
+                            <textarea className="flex-1 w-full p-6 bg-white border-2 border-blue-100 rounded-[24px] font-mono text-xs outline-none focus:ring-4 focus:ring-blue-50 resize-none shadow-sm" placeholder="Cole sua lista aqui..." value={text} onChange={e => setText(e.target.value)}/>
+                            <Button onClick={handleAnalyze} disabled={loading || !text.trim()} className="mt-4 w-full py-4 bg-blue-600 text-white rounded-[20px] font-black text-lg shadow-xl uppercase">
+                                {loading ? <Loader2 className="animate-spin" /> : "Analisar e Verificar Duplicados"}
+                            </Button>
+                        </div>
+                    ) : (
+                        <div className="flex flex-col h-full">
+                            <div className="px-6 py-3 flex justify-between items-center bg-white border-b shrink-0 shadow-sm z-10">
+                                <span className="font-black text-gray-800 text-sm uppercase">{items.length} Itens na lista</span>
+                                <div className="flex gap-4">
+                                    <span className="text-[10px] font-black text-orange-500 uppercase flex items-center gap-1">
+                                        <AlertTriangle size={12}/> {items.filter(i => i.isDuplicate).length} Já em Stock
+                                    </span>
+                                    <button onClick={() => setStep('INPUT')} className="text-[10px] font-black text-red-500 bg-red-50 px-3 py-1 rounded-lg">Reiniciar</button>
+                                </div>
+                            </div>
+
+                            <div className="flex-1 relative overflow-hidden">
+                                <div className="absolute inset-0 overflow-y-auto p-4 md:px-8 custom-scrollbar" ref={listRef}>
+                                    <div className="space-y-2">
+                                        {items.map((item) => (
+                                            <div key={item.id} className={`bg-white p-3 rounded-xl border flex items-center gap-3 transition-all ${item.isDuplicate ? 'border-orange-200 bg-orange-50/30' : 'border-gray-200'}`}>
+                                                <div className="flex-1">
+                                                    <input className={`w-full font-bold text-xs md:text-sm uppercase bg-transparent outline-none ${item.isDuplicate ? 'text-orange-700' : 'text-gray-700'}`} value={item.name} onChange={e => setItems(items.map(i => i.id === item.id ? {...i, name: e.target.value.toUpperCase(), isDuplicate: false} : i))}/>
+                                                    {item.isDuplicate && <p className="text-[8px] font-black text-orange-500 uppercase mt-0.5 flex items-center gap-1"><AlertOctagon size={10}/> Este produto já existe no seu inventário</p>}
+                                                </div>
+                                                <div className="w-24 bg-gray-50 rounded-lg p-1">
+                                                    <input type="number" className="w-full bg-transparent text-center font-black text-emerald-600 outline-none text-xs" value={item.price} onChange={e => setItems(items.map(i => i.id === item.id ? {...i, price: Number(e.target.value)} : i))}/>
+                                                </div>
+                                                <button onClick={() => setItems(items.filter(i => i.id !== item.id))} className="text-gray-300 hover:text-red-500 p-2"><Trash2 size={16}/></button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {step === 'REVIEW' && (
+                    <div className="p-4 border-t bg-white flex gap-3 shrink-0 shadow-lg z-20">
+                        <Button onClick={() => setStep('INPUT')} variant="outline" className="flex-1 py-4 font-bold uppercase border-2">Voltar</Button>
+                        <Button onClick={handleConfirm} disabled={loading || items.length === 0} className="flex-[2] py-4 bg-emerald-600 text-white rounded-xl font-black text-lg shadow-lg uppercase tracking-widest">
+                            {loading ? <Loader2 className="animate-spin"/> : "Confirmar Importação"}
+                        </Button>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+// 2. BUSCA NO CATÁLOGO (MESMA ESTRUTURA SEM CARD)
+const CatalogSearchModal = ({ onClose, onAdd }: { onClose: () => void, onAdd: (p: any) => void }) => {
+    const [searchTerm, setSearchTerm] = useState('');
+    const [results, setResults] = useState<GlobalProduct[]>([]);
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        const search = async () => {
+            if (searchTerm.length < 3) { setResults([]); return; }
+            setLoading(true);
+            const { data } = await fetchGlobalCatalog(searchTerm, 0, 20);
+            setResults(data);
+            setLoading(false);
+        };
+        const timer = setTimeout(search, 400);
+        return () => clearTimeout(timer);
+    }, [searchTerm]);
+
+    return (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="w-full max-w-2xl bg-white rounded-[32px] p-8 shadow-2xl h-[80vh] flex flex-col border border-gray-100">
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-xl font-black text-blue-900 uppercase flex items-center gap-2"><Database className="text-blue-500"/> Catálogo Mestre</h3>
+                    <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full"><X/></button>
+                </div>
+                <div className="relative mb-6">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20}/>
+                    <input className="w-full pl-12 pr-4 py-4 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none focus:border-blue-500 font-bold text-gray-700 uppercase" placeholder="Nome do medicamento..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} autoFocus />
+                </div>
+                <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-3">
+                    {results.map(gp => (
+                        <div key={gp.id} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex items-center justify-between hover:border-blue-300 transition-all group">
+                            <div className="flex items-center gap-4">
+                                <img src={gp.image} className="w-12 h-12 object-contain bg-gray-50 rounded-xl p-1" />
+                                <div><h4 className="font-black text-gray-800 text-sm uppercase">{gp.name}</h4><Badge color="gray" className="!text-[9px]">{gp.category}</Badge></div>
+                            </div>
+                            <Button onClick={() => onAdd(gp)} className="px-6 py-2 bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white rounded-xl font-black text-xs uppercase shadow-none">Adicionar <Plus size={16} className="ml-1"/></Button>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export const PharmacyProductsView = ({ pharmacyId, onRefresh }: { pharmacyId: string, onRefresh?: () => void }) => {
+  const [localProducts, setLocalProducts] = useState<Product[]>([]);
+  const [displayLimit, setDisplayLimit] = useState(ITEMS_PER_PAGE);
   const [loading, setLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
   const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
   
-  const [bulkText, setBulkText] = useState('');
-  const [processedItems, setProcessedItems] = useState<ProcessedImportItem[]>([]);
-  
-  const [fields, setFields] = useState({
-      name: '', price: 0, stock: 10, category: PRODUCT_CATEGORIES[0], description: '', requiresPrescription: false, globalId: '', image: ''
-  });
+  const [showBulkImport, setShowBulkImport] = useState(false);
+  const [showCatalogSearch, setShowCatalogSearch] = useState(false);
+  const [showManualForm, setShowManualForm] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
-  const [catalogMatches, setCatalogMatches] = useState<GlobalProduct[]>([]);
-  const [showCatalogSuggestions, setShowCatalogSuggestions] = useState(false);
+  const [formData, setFormData] = useState({ name: '', price: 0, stock: 10, category: PRODUCT_CATEGORIES[0], description: '', requiresPrescription: false, globalId: '', image: '', unitType: 'Caixa' as ProductUnitType });
 
-  const handleSave = async (e?: React.FormEvent) => {
-    if(e) e.preventDefault();
-    if (!fields.name || fields.price <= 0) {
-        setToast({msg: "Nome e preço são obrigatórios", type: 'error'});
-        return;
-    }
-    setLoading(true);
-    const payload = {
-        name: fields.name, description: fields.description || fields.name, price: fields.price, stock: fields.stock,
-        requiresPrescription: fields.requiresPrescription, category: fields.category, pharmacyId: pharmacyId,
-        image: fields.image || 'https://cdn-icons-png.flaticon.com/512/883/883407.png', globalProductId: fields.globalId || undefined
-    };
-    const result = editingId ? await updateProduct(editingId, payload) : await addProduct(payload);
-    setLoading(false);
-    if (result.success) { 
-        playSound('save'); 
-        setToast({msg: "Stock atualizado!", type: 'success'}); 
-        reset(); 
-        if(onRefresh) onRefresh(); 
-    }
+  useEffect(() => { loadLocalStock(); }, [pharmacyId]);
+
+  const loadLocalStock = async (forceRefresh = false) => {
+      const data = await fetchPharmacyInventory(pharmacyId, forceRefresh);
+      setLocalProducts(data);
+      if(forceRefresh) onRefresh?.();
   };
 
-  const handleNameChange = async (val: string) => {
-      setFields({...fields, name: val});
-      if (val.length > 2) {
-          const matches = await fetchGlobalCatalog(val);
-          setCatalogMatches(matches.slice(0, 5));
-          setShowCatalogSuggestions(true);
-      } else { setShowCatalogSuggestions(false); }
+  const handleEdit = (p: Product) => {
+      setEditingProduct(p);
+      setFormData({ name: p.name, price: p.price, stock: p.stock, category: p.category || 'Geral', description: p.description, requiresPrescription: p.requiresPrescription, globalId: p.globalProductId || '', image: p.image, unitType: p.unitType || 'Unidade' });
+      setShowManualForm(true);
+      playSound('click');
   };
 
-  const applyCatalogMatch = (item: GlobalProduct) => {
-      setFields({ ...fields, name: item.name, category: item.category, description: item.description, image: item.image, globalId: item.id });
-      setShowCatalogSuggestions(false);
-      playSound('success');
+  const handleSaveManual = async () => {
+      if (!formData.name || formData.price <= 0) { setToast({ msg: "Preencha nome e preço.", type: 'error' }); return; }
+      setLoading(true);
+      const payload = { name: formData.name, description: formData.description || formData.name, price: formData.price, stock: formData.stock, category: formData.category, requiresPrescription: formData.requiresPrescription, pharmacyId, image: formData.image || 'https://cdn-icons-png.flaticon.com/512/883/883407.png', globalProductId: formData.globalId || null, unitType: formData.unitType };
+      const res = editingProduct ? await updateProduct(editingProduct.id, payload) : await addProduct(payload);
+      setLoading(false);
+      if (res.success) { playSound('save'); setToast({ msg: editingProduct ? "Produto atualizado!" : "Produto adicionado!", type: 'success' }); loadLocalStock(); setShowManualForm(false); setEditingProduct(null); }
+      else setToast({ msg: "Erro ao gravar: " + res.error, type: 'error' });
   };
 
-  const handleBulkImport = async () => {
-    if (!bulkText.trim()) return;
-    setLoading(true);
-    const globalData = await fetchGlobalCatalog();
-    const items = await processBulkImportForPharmacy(bulkText, globalData);
-    setProcessedItems(items);
-    setLoading(false);
-  };
-
-  const handleSaveBulk = async () => {
-    setLoading(true);
-    const toAdd = processedItems.map(it => ({
-        name: it.name, description: it.description, price: it.price, stock: it.stock,
-        requiresPrescription: false, category: it.category, pharmacyId: pharmacyId,
-        image: 'https://cdn-icons-png.flaticon.com/512/883/883407.png', globalProductId: it.matchId
-    }));
-    const success = await bulkAddPharmacyProducts(toAdd);
-    setLoading(false);
-    if(success) {
-        playSound('success');
-        setToast({msg: "Importação concluída!", type: 'success'});
-        reset();
-        onRefresh?.();
-    }
-  };
-
-  const reset = () => {
-      setIsAdding(false); setIsBulkAdding(false); setEditingId(null); setBulkText(''); setProcessedItems([]); setShowCatalogSuggestions(false);
-      setFields({ name: '', price: 0, stock: 10, category: PRODUCT_CATEGORIES[0], description: '', requiresPrescription: false, globalId: '', image: '' });
-  }
-
-  const filteredProducts = products.filter(p => normalizeText(p.name).includes(normalizeText(searchTerm)));
+  const visibleProducts = localProducts.filter(p => normalizeText(p.name).includes(normalizeText(searchTerm))).slice(0, displayLimit);
 
   return (
     <div className="space-y-6 pb-20 animate-fade-in">
-      {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
-      
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-3xl border border-gray-100 shadow-sm gap-4">
-        <div>
-            <h1 className="text-2xl font-black text-gray-800">Inventário (Stock)</h1>
-            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Controle total de produtos e preços</p>
+        {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
+        
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-[32px] border border-gray-100 shadow-sm gap-4">
+            <div className="flex items-center gap-4">
+                <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl shadow-inner"><Package size={28}/></div>
+                <div><h1 className="text-xl md:text-2xl font-black text-gray-800 uppercase tracking-tight">Gestão de Stock</h1><p className="text-[10px] font-black text-emerald-700 px-2 py-0.5 rounded-full flex items-center gap-1"><Layers size={10}/> {localProducts.length} Items</p></div>
+            </div>
+            <div className="flex flex-wrap gap-2 w-full md:w-auto">
+                <Button onClick={() => setShowCatalogSearch(true)} className="h-12 px-5 bg-blue-600 text-white font-black uppercase text-[10px] rounded-xl shadow-lg flex-1 md:flex-none"><Search size={16} className="mr-2"/> Catálogo Mestre</Button>
+                <Button onClick={() => { setEditingProduct(null); setShowManualForm(true); }} className="h-12 px-5 bg-emerald-600 text-white font-black uppercase text-[10px] rounded-xl shadow-lg flex-1 md:flex-none"><ListPlus size={16} className="mr-2"/> Novo Produto</Button>
+                <Button onClick={() => setShowBulkImport(true)} variant="outline" className="h-12 px-5 border-gray-200 text-gray-500 font-black uppercase text-[10px] rounded-xl flex-1 md:flex-none"><UploadCloud size={16} className="mr-2"/> Importar</Button>
+            </div>
         </div>
-        <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setIsBulkAdding(true)} className="text-xs h-10 border-blue-600 text-blue-600"><UploadCloud size={16} className="mr-1"/> Importar Lista</Button>
-            <Button onClick={() => { reset(); setIsAdding(true); }} className="text-xs h-10"><Plus size={16} className="mr-1"/> Novo Item</Button>
+
+        <div className="bg-white p-2 rounded-2xl border shadow-sm flex items-center gap-3">
+            <Search className="text-gray-300 ml-4" size={20}/><input placeholder="Filtrar stock local..." className="w-full py-4 outline-none font-bold text-gray-700 uppercase" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/>
         </div>
-      </div>
 
-      <div className="bg-white p-2 rounded-2xl border shadow-sm flex items-center gap-3">
-          <Search className="text-gray-300 ml-4" size={20}/>
-          <input placeholder="Filtrar seu stock por nome..." className="w-full py-4 outline-none font-bold text-gray-700" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredProducts.length === 0 ? (
-              <div className="col-span-full py-20 text-center bg-white rounded-[40px] border border-dashed">
-                  <PackageCheck size={48} className="mx-auto text-gray-200 mb-2"/>
-                  <p className="text-gray-400 font-bold">Nenhum produto no stock com este nome.</p>
-              </div>
-          ) : (
-            filteredProducts.map(p => (
-                <div key={p.id} className="bg-white p-6 rounded-[32px] border border-gray-100 shadow-sm hover:shadow-xl transition-all relative overflow-hidden group">
-                    <div className="flex justify-between items-start mb-4">
-                        <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center p-2 border shadow-inner">
-                            <img src={p.image} className="w-full h-full object-contain" alt={p.name} />
-                        </div>
-                        <Badge color={p.stock > 0 ? 'green' : 'red'}>{p.stock > 0 ? `Stock: ${p.stock}` : 'Esgotado'}</Badge>
-                    </div>
-                    <h3 className="font-bold text-gray-800 text-base mb-1 line-clamp-2 min-h-[3rem]">{p.name}</h3>
-                    <p className="font-black text-2xl text-emerald-600 mb-4">Kz {p.price.toLocaleString()}</p>
-                    <div className="flex gap-2">
-                        <button 
-                            onClick={() => { 
-                                setEditingId(p.id); 
-                                setFields({
-                                    name: p.name, price: p.price, stock: p.stock, 
-                                    category: p.category || PRODUCT_CATEGORIES[0], 
-                                    description: p.description, requiresPrescription: p.requiresPrescription, 
-                                    globalId: p.globalProductId || '', image: p.image
-                                }); 
-                                setIsAdding(true); 
-                            }} 
-                            className="flex-1 py-3 bg-blue-50 text-blue-600 rounded-xl font-black text-xs hover:bg-blue-600 hover:text-white transition-all"
-                        >
-                            Editar Item
-                        </button>
-                        <button onClick={async () => { if(confirm("Remover permanentemente do seu stock?")) { await bulkDeletePharmacyProducts([p.id]); onRefresh?.(); } }} className="p-3 bg-red-50 text-red-400 rounded-xl hover:bg-red-500 hover:text-white transition-all"><Trash2 size={18}/></button>
-                    </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {visibleProducts.map(p => (
+                <div key={p.id} className="bg-white p-5 rounded-[28px] border border-gray-100 hover:shadow-lg transition-all group">
+                    <div className="flex justify-between items-start mb-3"><div className="w-14 h-14 bg-gray-50 rounded-2xl p-2 border flex items-center justify-center"><img src={p.image} className="w-full h-full object-contain" /></div><Badge color={p.stock > 5 ? 'green' : 'red'}>{p.stock} un</Badge></div>
+                    <h4 className="font-bold text-gray-800 text-sm uppercase line-clamp-2 min-h-[2.5em]">{p.name}</h4>
+                    <div className="flex justify-between items-end mt-4 pt-4 border-t border-gray-50"><span className="text-xl font-black text-emerald-600">Kz {p.price.toLocaleString()}</span><div className="flex gap-2"><button onClick={() => handleEdit(p)} className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-600 hover:text-white"><Edit2 size={16}/></button><button onClick={async () => { if(confirm("Remover do stock?")) { await bulkDeletePharmacyProducts([p.id]); loadLocalStock(); } }} className="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-500 hover:text-white"><Trash2 size={16}/></button></div></div>
                 </div>
-            ))
-          )}
-      </div>
+            ))}
+        </div>
 
-      {/* MODAL DE ADIÇÃO / EDIÇÃO */}
-      {isAdding && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
-              <Card className="w-full max-w-2xl p-8 shadow-2xl border-t-4 border-emerald-500 animate-scale-in max-h-[90vh] overflow-y-auto custom-scrollbar">
-                  <div className="flex justify-between items-center mb-8 border-b pb-4">
-                      <h3 className="font-black text-2xl text-gray-800 flex items-center gap-2">
-                          {editingId ? <Edit2 className="text-blue-500"/> : <Plus className="text-emerald-500"/>}
-                          {editingId ? 'Editar Produto' : 'Adicionar ao Stock'}
-                      </h3>
-                      <button onClick={reset} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><X size={24}/></button>
-                  </div>
+        {showBulkImport && <BulkImportModal pharmacyId={pharmacyId} existingStock={localProducts} onClose={() => setShowBulkImport(false)} onComplete={() => { setShowBulkImport(false); loadLocalStock(true); setToast({ msg: "Produtos importados!", type: 'success' }); }} />}
+        {showCatalogSearch && <CatalogSearchModal onClose={() => setShowCatalogSearch(false)} onAdd={(gp) => { setFormData({ name: gp.name, price: gp.referencePrice || 0, stock: 20, category: gp.category, description: gp.name, requiresPrescription: false, globalId: gp.id, image: gp.image, unitType: 'Caixa' }); setShowCatalogSearch(false); setShowManualForm(true); }} />}
+        
+        {showManualForm && (
+            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
+                <div className="w-full max-w-lg p-8 rounded-[40px] shadow-2xl max-h-[90vh] overflow-y-auto bg-white border border-gray-100">
+                    <div className="flex justify-between items-center mb-6 border-b pb-4"><h3 className="font-black text-xl text-gray-800 uppercase flex items-center gap-2">{editingProduct ? <Edit2 size={24} className="text-blue-500"/> : <ListPlus size={24} className="text-emerald-500"/>} {editingProduct ? 'Editar Produto' : 'Novo Produto'}</h3><button onClick={() => { setShowManualForm(false); setEditingProduct(null); }}><X/></button></div>
+                    <form onSubmit={(e) => { e.preventDefault(); handleSaveManual(); }} className="space-y-6">
+                        <div><label className="label-text">Nome do Medicamento</label><input className="input-field uppercase font-bold" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value.toUpperCase()})} required /></div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div><label className="label-text">Preço (Kz)</label><input type="number" className="input-field font-black" value={formData.price} onChange={e => setFormData({...formData, price: Number(e.target.value)})} /></div>
+                            <div><label className="label-text">Stock</label><input type="number" className="input-field" value={formData.stock} onChange={e => setFormData({...formData, stock: Number(e.target.value)})} /></div>
+                        </div>
+                        <div className="flex gap-4 pt-4"><Button type="button" variant="outline" className="flex-1 py-4" onClick={() => setShowManualForm(false)}>Cancelar</Button><Button type="submit" disabled={loading} className="flex-[2] py-4 bg-emerald-600 text-white font-black uppercase">Gravar</Button></div>
+                    </form>
+                </div>
+            </div>
+        )}
 
-                  <form onSubmit={handleSave} className="space-y-6">
-                      <div className="relative">
-                          <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1 mb-1 block">Nome Comercial do Medicamento</label>
-                          <div className="relative">
-                            <input 
-                                className="w-full p-4 bg-gray-50 border rounded-2xl outline-none focus:ring-2 focus:ring-emerald-500 font-bold transition-all" 
-                                placeholder="Busque ou digite o nome..."
-                                value={fields.name}
-                                onChange={e => handleNameChange(e.target.value)}
-                                autoComplete="off"
-                            />
-                            {showCatalogSuggestions && catalogMatches.length > 0 && (
-                                <div className="absolute top-full left-0 w-full bg-white border border-emerald-100 rounded-2xl shadow-2xl mt-1 z-[250] overflow-hidden animate-slide-in-top">
-                                    <div className="p-2 bg-emerald-50 text-[9px] font-black text-emerald-600 uppercase tracking-widest border-b">Sugestões do Catálogo Global</div>
-                                    {catalogMatches.map(match => (
-                                        <div key={match.id} onClick={() => applyCatalogMatch(match)} className="p-3 hover:bg-emerald-50 cursor-pointer flex items-center gap-3 transition-colors border-b last:border-0 group">
-                                            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center border group-hover:border-emerald-200"><img src={match.image} className="max-h-full object-contain p-1" /></div>
-                                            <div className="flex-1">
-                                                <p className="text-xs font-bold text-gray-800">{match.name}</p>
-                                                <p className="text-[8px] text-gray-400 uppercase">{match.category}</p>
-                                            </div>
-                                            <Link2 size={14} className="text-gray-300 group-hover:text-emerald-500"/>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                          </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                          <div>
-                              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1 mb-1 block">Preço de Venda (Kz)</label>
-                              <div className="relative">
-                                  <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-gray-300">Kz</span>
-                                  <input type="number" className="w-full pl-12 p-4 bg-gray-50 border rounded-2xl outline-none focus:ring-2 focus:ring-emerald-500 font-black text-emerald-600" value={fields.price} onChange={e => setFields({...fields, price: Number(e.target.value)})}/>
-                              </div>
-                          </div>
-                          <div>
-                              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1 mb-1 block">Quantidade em Stock</label>
-                              <input type="number" className="w-full p-4 bg-gray-50 border rounded-2xl outline-none focus:ring-2 focus:ring-emerald-500 font-bold" value={fields.stock} onChange={e => setFields({...fields, stock: Number(e.target.value)})}/>
-                          </div>
-                      </div>
-
-                      <div>
-                          <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1 mb-1 block">Categoria do Medicamento</label>
-                          <select className="w-full p-4 bg-gray-50 border rounded-2xl outline-none focus:ring-2 focus:ring-emerald-500 font-bold text-sm" value={fields.category} onChange={e => setFields({...fields, category: e.target.value})}>
-                              {PRODUCT_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                          </select>
-                      </div>
-
-                      <div className="flex items-center gap-3 bg-blue-50 p-4 rounded-2xl border border-blue-100">
-                          <input 
-                            type="checkbox" 
-                            id="rx-needed" 
-                            className="w-5 h-5 rounded text-blue-600" 
-                            checked={fields.requiresPrescription} 
-                            onChange={e => setFields({...fields, requiresPrescription: e.target.checked})}
-                          />
-                          <label htmlFor="rx-needed" className="text-xs font-black text-blue-800 uppercase tracking-tight cursor-pointer">Requer Receita Médica para Venda</label>
-                      </div>
-
-                      <div className="flex gap-3 pt-6 border-t">
-                          <Button variant="outline" type="button" onClick={reset} className="flex-1 py-4 font-bold">Cancelar</Button>
-                          <Button type="submit" disabled={loading} className="flex-[2] py-4 font-black text-lg shadow-xl shadow-emerald-100">
-                              {loading ? <Loader2 className="animate-spin"/> : <Save size={20} className="mr-2"/>}
-                              {editingId ? 'Gravar Alterações' : 'Adicionar ao Stock'}
-                          </Button>
-                      </div>
-                  </form>
-              </Card>
-          </div>
-      )}
-
-      {/* MODAL DE IMPORTAÇÃO EM MASSA */}
-      {isBulkAdding && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
-              <Card className="w-full max-w-4xl p-8 shadow-2xl animate-scale-in">
-                  <div className="flex justify-between items-center mb-8 border-b pb-4">
-                      <h3 className="font-black text-2xl text-gray-800 flex items-center gap-2"><UploadCloud className="text-blue-500"/> Importar Lista Industrial</h3>
-                      <button onClick={reset} className="p-2 hover:bg-gray-100 rounded-full"><X size={24}/></button>
-                  </div>
-
-                  {processedItems.length === 0 ? (
-                      <div className="space-y-6">
-                          <div className="bg-blue-50 p-6 rounded-[32px] border border-blue-100">
-                              <h4 className="font-black text-blue-800 text-sm uppercase mb-2 flex items-center gap-2"><Info size={16}/> Como importar?</h4>
-                              <p className="text-xs text-blue-700 leading-relaxed">
-                                Cole abaixo sua lista de produtos. O sistema tentará identificar nomes, laboratórios e preços automaticamente.
-                                <br/><br/>
-                                <strong>Dica de Formato:</strong> Nome do Produto (DCI), Dosagem, Forma, Qtd, Lab, Kz Valor
-                              </p>
-                          </div>
-                          <textarea 
-                            className="w-full p-6 border rounded-[32px] h-64 font-mono text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 shadow-inner" 
-                            placeholder="Ex: Panadol (Paracetamol), 500mg, Comp, 20 un, GSK, Kz 1500"
-                            value={bulkText}
-                            onChange={e => setBulkText(e.target.value)}
-                          />
-                          <Button onClick={handleBulkImport} disabled={loading || !bulkText} className="w-full py-5 bg-blue-600 hover:bg-blue-700 font-black text-lg rounded-[32px] shadow-xl shadow-blue-100">
-                              {loading ? <Loader2 className="animate-spin mr-2"/> : <Search className="mr-2"/>} Analisar Lista
-                          </Button>
-                      </div>
-                  ) : (
-                      <div className="space-y-6">
-                          <div className="max-h-[50vh] overflow-y-auto border rounded-3xl custom-scrollbar">
-                              <table className="w-full text-left">
-                                  <thead className="sticky top-0 bg-gray-50 border-b text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                                      <tr><th className="p-4">Medicamento Identificado</th><th className="p-4">Categoria</th><th className="p-4 text-right">Preço</th></tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-gray-100">
-                                      {processedItems.map((it, idx) => (
-                                          <tr key={idx} className="hover:bg-gray-50">
-                                              <td className="p-4"><p className="text-xs font-bold text-gray-700">{it.name}</p></td>
-                                              <td className="p-4"><Badge color="blue">{it.category}</Badge></td>
-                                              <td className="p-4 text-right font-black text-emerald-600">Kz {it.price.toLocaleString()}</td>
-                                          </tr>
-                                      ))}
-                                  </tbody>
-                              </table>
-                          </div>
-                          <div className="flex gap-3">
-                              <Button variant="outline" onClick={() => setProcessedItems([])} className="flex-1 font-bold">Voltar / Corrigir</Button>
-                              <Button onClick={handleSaveBulk} disabled={loading} className="flex-[2] py-5 font-black text-lg bg-emerald-600 shadow-xl shadow-emerald-100">
-                                  {loading ? <Loader2 className="animate-spin mr-2"/> : <CheckCircle2 className="mr-2"/>} Confirmar {processedItems.length} Itens
-                              </Button>
-                          </div>
-                      </div>
-                  )}
-              </Card>
-          </div>
-      )}
+        <style>{`
+            .label-text { display: block; font-size: 10px; font-weight: 900; color: #9ca3af; text-transform: uppercase; margin-bottom: 4px; margin-left: 4px; }
+            .input-field { width: 100%; padding: 16px; background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 16px; outline: none; transition: all; font-size: 14px; }
+            .input-field:focus { border-color: #10b981; background-color: white; }
+        `}</style>
     </div>
   );
 };
-
-const PackageCheck = ({ size, className }: any) => <FileText size={size} className={className}/>;
-const Info = ({ size, className }: any) => <AlertTriangle size={size} className={className}/>;

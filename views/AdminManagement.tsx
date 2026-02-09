@@ -1,16 +1,17 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Card, Badge, Toast, Button } from '../components/UI';
 import { Pharmacy, User, UserRole } from '../types';
+import { supabase } from '../services/supabaseClient';
 import { 
-    fetchPharmacies, approvePharmacy, deletePharmacy, 
-    fetchAllUsers, adminUpdateUser, updatePharmacyDetails, 
-    updatePharmacyCommission, resetCustomerData, 
-    recoverPharmacyLink, togglePharmacyAvailability 
+    fetchPharmacies, deletePharmacy, 
+    fetchAllUsers, adminUpdateUser, 
+    recoverPharmacyLink, togglePharmacyAvailability,
+    togglePharmacyDelivery
 } from '../services/dataService';
 import { 
-    RefreshCw, UserCog, Edit, Ban, Trash2, X, Store, 
-    Bike, ShieldCheck, Save, Loader2, RotateCcw, 
-    Link2, Power, Search, Hash, MapPin, Phone, DollarSign 
+    RefreshCw, UserCog, Edit, Trash2, X, ShieldCheck, Save, Loader2, RotateCcw, 
+    Link2, Search, Sparkles, BrainCircuit, Trophy
 } from 'lucide-react';
 import { playSound } from '../services/soundService';
 
@@ -62,13 +63,12 @@ export const AdminUserManagement = () => {
     const handleReset = async (u: User) => {
         if (!confirm(`Deseja REINICIAR a conta de ${u.name}?`)) return;
         setLoading(true);
-        const success = await resetCustomerData(u.id, u.name);
+        await supabase.from('prescriptions').delete().eq('customer_id', u.id);
+        await supabase.from('orders').delete().eq('customer_name', u.name);
         setLoading(false);
-        if (success) {
-            playSound('trash');
-            setToast({ msg: "Conta reiniciada!", type: 'success' });
-            load();
-        }
+        playSound('trash');
+        setToast({ msg: "Conta reiniciada!", type: 'success' });
+        load();
     };
 
     return (
@@ -157,7 +157,6 @@ export const AdminPharmacyManagement = () => {
     const [loading, setLoading] = useState(true);
     const [editing, setEditing] = useState<Pharmacy | null>(null);
     const [toast, setToast] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
-    const [actionLoading, setActionLoading] = useState<string | null>(null);
     const [q, setQ] = useState('');
 
     useEffect(() => { load(); }, []);
@@ -173,132 +172,74 @@ export const AdminPharmacyManagement = () => {
     const handleUpdate = async () => {
         if(!editing) return;
         setLoading(true);
-        const success = await updatePharmacyDetails(editing.id, { 
-            name: editing.name, nif: editing.nif || '', address: editing.address, 
-            deliveryFee: editing.deliveryFee, minTime: editing.minTime, 
-            phone: editing.phone || '', rating: editing.rating 
-        });
-        await togglePharmacyAvailability(editing.id, editing.isAvailable);
-        await updatePharmacyCommission(editing.id, editing.commissionRate || 10);
-        setLoading(false);
-        if(success) { 
-            setToast({msg: "Dados Atualizados!", type: 'success'}); 
-            setEditing(null); 
-            load(); 
-        }
-    };
-
-    const handleQuickToggleStatus = async (p: Pharmacy) => {
-        setActionLoading(p.id + '_status');
-        if(await togglePharmacyAvailability(p.id, !p.isAvailable)) { 
-            playSound(!p.isAvailable ? 'success' : 'click'); 
-            await load(); 
-        }
-        setActionLoading(null);
-    };
-
-    const handleQuickToggleDelivery = async (p: Pharmacy) => {
-        setActionLoading(p.id + '_delivery');
-        const newFee = p.deliveryFee > 0 ? 0 : 600;
-        if(await updatePharmacyDetails(p.id, { ...p, nif: p.nif || '', phone: p.phone || '', deliveryFee: newFee })) { 
-            playSound(newFee > 0 ? 'success' : 'click'); 
-            await load(); 
-        }
-        setActionLoading(null);
-    };
-
-    const handleApprove = async (id: string) => {
-        if(!confirm("Aprovar esta farmácia para começar a vender?")) return;
-        setLoading(true);
-        if((await approvePharmacy(id)).success) { 
-            playSound('success'); 
-            setToast({msg: "Farmácia aprovada!", type: 'success'}); 
-            load(); 
-        }
-        setLoading(false);
-    };
-
-    const handleFreeze = async (p: Pharmacy) => {
-        const newStatus = p.status === 'BLOCKED' ? 'APPROVED' : 'BLOCKED';
-        if(!confirm(`Deseja alterar o status desta farmácia para ${newStatus}?`)) return;
-        setLoading(true);
-        const { error = null } = await (window as any).supabase.from('pharmacies').update({ status: newStatus }).eq('id', p.id);
-        setLoading(false);
+        
+        const { error } = await supabase.from('pharmacies').update({
+            name: editing.name, 
+            nif: editing.nif || '', 
+            address: editing.address,
+            delivery_fee: editing.deliveryFee, 
+            min_time: editing.minTime, 
+            phone: editing.phone || '', 
+            rating: editing.rating,
+            receives_low_conf_rx: editing.receives_low_conf_rx, 
+            commission_rate: editing.commissionRate || 10,
+            is_available: editing.isAvailable,
+            delivery_active: editing.deliveryActive
+        }).eq('id', editing.id);
+        
         if(!error) { 
-            playSound(newStatus === 'APPROVED' ? 'success' : 'error'); 
-            load(); 
-        }
-    };
-
-    const handleDelete = async (id: string, name: string) => {
-        if(!confirm(`ELIMINAR permanentemente a farmácia ${name}? Todos os produtos e histórico serão perdidos.`)) return;
-        setLoading(true);
-        if(await deletePharmacy(id)) { 
-            playSound('trash'); 
-            load(); 
+            playSound('save');
+            setToast({msg: "Dados da farmácia atualizados!", type: 'success'}); 
+            setEditing(null); 
+            await load(); 
+        } else {
+            setToast({msg: "Erro ao salvar: " + error.message, type: 'error'});
         }
         setLoading(false);
     };
+
+    const toggleExpertMode = () => {
+        if(!editing) return;
+        setEditing(prev => prev ? { ...prev, receives_low_conf_rx: !prev.receives_low_conf_rx } : null);
+        playSound('click');
+    }
 
     return (
         <div className="space-y-6 animate-fade-in pb-10">
             {toast && <Toast message={toast.msg} type={toast.type === 'success' ? 'success' : 'error'} onClose={() => setToast(null)} />}
             
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded-3xl border shadow-sm gap-4">
-                <div>
-                    <h2 className="text-2xl font-black text-gray-800">Parceiros de Rede</h2>
-                    <p className="text-xs text-gray-400 font-bold uppercase">Gestão de acessos, comissões e logística</p>
+            <div className="bg-emerald-900 p-8 rounded-[40px] text-white flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl mb-8 relative overflow-hidden">
+                <div className="relative z-10">
+                    <h2 className="text-3xl font-black flex items-center gap-3"><Trophy className="text-yellow-400"/> Ranking de Especialistas</h2>
+                    <p className="text-emerald-300 font-bold mt-1">Farmácias com maior Score IA ganham prioridade nas buscas.</p>
                 </div>
-                <div className="flex items-center gap-3 w-full md:w-auto">
-                    <div className="bg-gray-50 border rounded-xl px-3 py-2 flex items-center gap-2 flex-1 md:w-64">
-                        <Search size={18} className="text-gray-400"/>
-                        <input placeholder="Filtrar farmácias..." className="bg-transparent outline-none text-sm w-full font-medium" value={q} onChange={e => setQ(e.target.value)}/>
-                    </div>
-                    <button onClick={load} className="p-3 bg-white border rounded-2xl hover:bg-gray-100 transition-all"><RefreshCw size={20} className={loading ? 'animate-spin' : ''}/></button>
-                </div>
+                <BrainCircuit className="absolute -right-10 -bottom-10 text-white/5 w-64 h-64" />
             </div>
 
             <div className="grid gap-4">
                 {filtered.map(p => (
-                    <div key={p.id} className={`bg-white p-5 rounded-3xl border shadow-sm flex flex-col md:flex-row items-center justify-between gap-6 hover:shadow-md transition-all ${p.status === 'BLOCKED' ? 'opacity-70 grayscale' : ''}`}>
-                        <div className="flex items-center gap-4 w-full md:w-auto">
-                            <div className="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-2xl border shadow-inner bg-emerald-50 text-emerald-700 shrink-0">{p.name.charAt(0)}</div>
-                            <div className="min-w-0">
-                                <h3 className="font-bold text-gray-800 text-lg truncate max-w-[250px]">{p.name}</h3>
-                                <div className="flex flex-wrap gap-2 mt-1">
-                                    <Badge color={p.status === 'APPROVED' ? 'green' : (p.status === 'BLOCKED' ? 'red' : 'yellow')}>
-                                        {p.status === 'APPROVED' ? 'ATIVO' : (p.status === 'BLOCKED' ? 'BLOQUEADO' : 'PENDENTE')}
+                    <div key={p.id} className="bg-white p-6 rounded-[32px] border flex flex-col md:flex-row items-center justify-between gap-6 hover:shadow-lg transition-all">
+                        <div className="flex items-center gap-4">
+                            <div className="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-2xl bg-emerald-50 text-emerald-700 shrink-0">{p.name.charAt(0)}</div>
+                            <div>
+                                <h3 className="font-bold text-gray-800 text-lg">{p.name}</h3>
+                                <div className="flex gap-2 mt-1">
+                                    <Badge color={p.receives_low_conf_rx ? 'blue' : 'gray'}>
+                                        {p.receives_low_conf_rx ? 'ESPECIALISTA IA' : 'VENDA NORMAL'}
                                     </Badge>
-                                    <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">Comissão: {p.commissionRate}%</span>
+                                    <Badge color={p.isAvailable ? 'green' : 'red'}>
+                                        {p.isAvailable ? 'ONLINE' : 'OFFLINE'}
+                                    </Badge>
+                                    <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                                        Score: {p.review_score || 0} pts
+                                    </span>
                                 </div>
                             </div>
                         </div>
 
-                        <div className="flex items-center gap-6 bg-gray-50 p-4 rounded-2xl border border-gray-100">
-                             <div className="flex flex-col items-center gap-1">
-                                <button onClick={() => handleQuickToggleStatus(p)} disabled={!!actionLoading} className={`p-2 rounded-xl transition-all ${p.isAvailable ? 'bg-emerald-600 text-white shadow-lg' : 'bg-gray-200'}`}>
-                                    {actionLoading === p.id + '_status' ? <Loader2 size={16} className="animate-spin"/> : <Power size={18}/>}
-                                </button>
-                                <span className="text-[8px] font-black uppercase text-gray-400">Loja</span>
-                             </div>
-                             <div className="flex flex-col items-center gap-1">
-                                <button onClick={() => handleQuickToggleDelivery(p)} disabled={!!actionLoading} className={`p-2 rounded-xl transition-all ${p.deliveryFee > 0 ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200'}`}>
-                                    {actionLoading === p.id + '_delivery' ? <Loader2 size={16} className="animate-spin"/> : <Bike size={18}/>}
-                                </button>
-                                <span className="text-[8px] font-black uppercase text-gray-400">Entrega</span>
-                             </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 w-full md:w-auto justify-end">
-                            {p.status === 'PENDING' ? (
-                                <button onClick={() => handleApprove(p.id)} className="px-6 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-black shadow-lg">APROVAR AGORA</button>
-                            ) : (
-                                <button onClick={() => handleFreeze(p)} className="p-3 rounded-2xl bg-orange-50 text-orange-600 hover:bg-orange-600 hover:text-white transition-all">
-                                    {p.status === 'BLOCKED' ? <ShieldCheck size={20}/> : <Ban size={20}/>}
-                                </button>
-                            )}
-                            <button onClick={() => setEditing(p)} className="p-3 bg-blue-50 text-blue-600 rounded-2xl hover:bg-blue-600 hover:text-white transition-all"><Edit size={20}/></button>
-                            <button onClick={() => handleDelete(p.id, p.name)} className="p-3 bg-red-50 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all"><Trash2 size={20}/></button>
+                        <div className="flex items-center gap-2">
+                            <button onClick={() => setEditing(p)} className="p-4 bg-blue-50 text-blue-600 rounded-2xl hover:bg-blue-600 hover:text-white transition-all"><Edit size={20}/></button>
+                            <button onClick={async () => { if(confirm("Eliminar farmácia?")) { await deletePharmacy(p.id); load(); } }} className="p-4 bg-red-50 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all"><Trash2 size={20}/></button>
                         </div>
                     </div>
                 ))}
@@ -308,36 +249,69 @@ export const AdminPharmacyManagement = () => {
                 <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
                     <Card className="w-full max-w-2xl p-8 max-h-[90vh] overflow-y-auto animate-scale-in">
                         <div className="flex justify-between items-center mb-8 border-b pb-4">
-                            <h3 className="font-black text-2xl flex items-center gap-2 text-gray-800"><Store className="text-emerald-600"/> Configuração de Parceiro</h3>
-                            <button onClick={() => setEditing(null)} className="p-2 hover:bg-gray-100 rounded-full"><X size={24}/></button>
+                            <h3 className="font-black text-2xl flex items-center gap-2"><Sparkles className="text-orange-500"/> Gestão de Especialista</h3>
+                            <button onClick={() => setEditing(null)} className="p-2 hover:bg-gray-100 rounded-full"><X/></button>
                         </div>
                         
-                        <div className="grid md:grid-cols-2 gap-8">
-                            <div className="space-y-5">
-                                <h4 className="text-xs font-black text-blue-600 uppercase tracking-widest flex items-center gap-2"><Hash size={14}/> Dados Comerciais</h4>
-                                <div><label className="text-[10px] font-black uppercase text-gray-400 mb-1 block">Nome Comercial</label><input className="w-full p-3 border rounded-xl" value={editing.name} onChange={e => setEditing({...editing, name: e.target.value})}/></div>
-                                <div><label className="text-[10px] font-black uppercase text-gray-400 mb-1 block">NIF</label><input className="w-full p-3 border rounded-xl" value={editing.nif || ''} onChange={e => setEditing({...editing, nif: e.target.value})}/></div>
-                                <div><label className="text-[10px] font-black uppercase text-gray-400 mb-1 block">Contacto WhatsApp</label><input className="w-full p-3 border rounded-xl" value={editing.phone || ''} onChange={e => setEditing({...editing, phone: e.target.value})}/></div>
+                        <div className="space-y-6">
+                            {/* CONTROLES ADMINISTRATIVOS DE STATUS */}
+                            <div className="bg-emerald-50/50 p-6 rounded-[32px] border border-emerald-100 grid md:grid-cols-2 gap-6">
+                                <div className="flex items-center justify-between bg-white p-4 rounded-2xl border">
+                                    <div>
+                                        <p className="font-black text-gray-800 text-xs uppercase">Status Online</p>
+                                        <p className="text-[9px] text-gray-400 font-bold uppercase">Visibilidade no Shopping</p>
+                                    </div>
+                                    <button 
+                                        type="button"
+                                        onClick={() => setEditing({...editing, isAvailable: !editing.isAvailable})}
+                                        className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${editing.isAvailable ? 'bg-emerald-500' : 'bg-gray-200'}`}
+                                    >
+                                        <span className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ml-1 ${editing.isAvailable ? 'translate-x-6' : ''}`} />
+                                    </button>
+                                </div>
+                                <div className="flex items-center justify-between bg-white p-4 rounded-2xl border">
+                                    <div>
+                                        <p className="font-black text-gray-800 text-xs uppercase">Entregas Ativas</p>
+                                        <p className="text-[9px] text-gray-400 font-bold uppercase">Opção de Delivery</p>
+                                    </div>
+                                    <button 
+                                        type="button"
+                                        onClick={() => setEditing({...editing, deliveryActive: !editing.deliveryActive})}
+                                        className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${editing.deliveryActive ? 'bg-blue-600' : 'bg-gray-200'}`}
+                                    >
+                                        <span className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ml-1 ${editing.deliveryActive ? 'translate-x-6' : ''}`} />
+                                    </button>
+                                </div>
                             </div>
-                            
-                            <div className="space-y-5">
-                                <h4 className="text-xs font-black text-emerald-600 uppercase tracking-widest flex items-center gap-2"><DollarSign size={14}/> Regras de Negócio</h4>
-                                <div><label className="text-[10px] font-black uppercase text-gray-400 mb-1 block">Taxa Entrega Padrão (Kz)</label><input type="number" className="w-full p-3 border rounded-xl" value={editing.deliveryFee} onChange={e => setEditing({...editing, deliveryFee: Number(e.target.value)})}/></div>
-                                <div><label className="text-[10px] font-black uppercase text-gray-400 mb-1 block">Comissão FarmoLink (%)</label><input type="number" className="w-full p-3 border rounded-xl font-bold text-blue-600" value={editing.commissionRate} onChange={e => setEditing({...editing, commissionRate: Number(e.target.value)})}/></div>
-                                <div><label className="text-[10px] font-black uppercase text-gray-400 mb-1 block">Avaliação Global</label><input type="number" step="0.1" className="w-full p-3 border rounded-xl" value={editing.rating} onChange={e => setEditing({...editing, rating: Number(e.target.value)})}/></div>
-                            </div>
-                        </div>
 
-                        <div className="mt-6">
-                            <label className="text-[10px] font-black uppercase text-gray-400 mb-1 block"><MapPin size={10}/> Localização Exata</label>
-                            <textarea className="w-full p-3 border rounded-xl h-20 text-sm" value={editing.address} onChange={e => setEditing({...editing, address: e.target.value})}/>
+                            <div className="bg-orange-50 p-6 rounded-[32px] border border-orange-100 flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    <div className="p-3 bg-white rounded-2xl shadow-sm text-orange-500"><BrainCircuit/></div>
+                                    <div>
+                                        <p className="font-black text-orange-900 text-sm">Habilitar Validação de IA?</p>
+                                        <p className="text-[10px] text-orange-700 font-bold">Esta farmácia receberá receitas com baixa confiança.</p>
+                                    </div>
+                                </div>
+                                <button 
+                                    type="button"
+                                    onClick={toggleExpertMode}
+                                    className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${editing.receives_low_conf_rx ? 'bg-orange-500' : 'bg-gray-200'}`}
+                                >
+                                    <span className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ml-1 ${editing.receives_low_conf_rx ? 'translate-x-6' : ''}`} />
+                                </button>
+                            </div>
+
+                            <div className="grid md:grid-cols-2 gap-4">
+                                <div><label className="text-[10px] font-black uppercase text-gray-400 mb-1 block">Nome Comercial</label><input className="w-full p-4 bg-gray-50 border rounded-2xl outline-none font-bold" value={editing.name} onChange={e => setEditing({...editing, name: e.target.value})}/></div>
+                                <div><label className="text-[10px] font-black uppercase text-gray-400 mb-1 block">Comissão (%)</label><input type="number" className="w-full p-4 bg-gray-50 border rounded-2xl outline-none font-bold" value={editing.commissionRate || 10} onChange={e => setEditing({...editing, commissionRate: Number(e.target.value)})}/></div>
+                            </div>
                         </div>
 
                         <div className="flex gap-3 pt-10 border-t mt-8">
                             <Button variant="outline" className="flex-1" onClick={() => setEditing(null)}>Cancelar</Button>
                             <Button className="flex-[2] py-4 font-black shadow-xl" onClick={handleUpdate} disabled={loading}>
                                 {loading ? <Loader2 className="animate-spin mr-2"/> : <Save size={20} className="mr-2"/>} 
-                                Gravar Configurações
+                                Gravar Alterações
                             </Button>
                         </div>
                     </Card>

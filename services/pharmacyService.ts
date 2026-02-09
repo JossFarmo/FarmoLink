@@ -1,5 +1,5 @@
 
-import { supabase } from './supabaseClient';
+import { supabase, safeQuery } from './supabaseClient';
 import { Pharmacy, PharmacyInput, PharmacyFinancials, User, OrderStatus, CommissionStatus } from '../types';
 
 export const recoverPharmacyLink = async (user: User): Promise<string | null> => {
@@ -12,6 +12,7 @@ export const recoverPharmacyLink = async (user: User): Promise<string | null> =>
                 status: 'PENDING',
                 owner_email: user.email,
                 is_available: false,
+                delivery_active: true,
                 address: 'Pendente de Configuração',
                 rating: 5.0,
                 delivery_fee: 600,
@@ -30,54 +31,123 @@ export const recoverPharmacyLink = async (user: User): Promise<string | null> =>
 }
 
 export const fetchPharmacies = async (isAdmin: boolean = false): Promise<Pharmacy[]> => {
-  let query = supabase.from('pharmacies').select('*');
-  if (!isAdmin) query = query.eq('status', 'APPROVED');
-  const { data } = await query;
-  return (data || []).map((p: any) => ({
-    id: p.id, name: p.name, nif: p.nif, address: p.address || 'Pendente',
-    rating: p.rating, deliveryFee: p.delivery_fee, minTime: p.min_time,
-    isAvailable: p.is_available, status: p.status, ownerEmail: p.owner_email,
-    commissionRate: p.commission_rate, phone: p.phone, distance: 'N/A'
+  const res = await safeQuery(async () => {
+    let query = supabase.from('pharmacies').select('*');
+    if (!isAdmin) query = query.eq('status', 'APPROVED');
+    return query;
+  });
+
+  return (res?.data || []).map((p: any) => ({
+    id: p.id, 
+    name: p.name, 
+    nif: p.nif, 
+    address: p.address || 'Pendente',
+    rating: Number(p.rating), 
+    deliveryFee: Number(p.delivery_fee), 
+    minTime: p.min_time,
+    isAvailable: !!p.is_available,
+    deliveryActive: !!(p.delivery_active ?? true), 
+    status: p.status, 
+    ownerEmail: p.owner_email,
+    commissionRate: p.commission_rate, 
+    phone: p.phone, 
+    distance: 'N/A',
+    review_score: p.review_score,
+    receives_low_conf_rx: p.receives_low_conf_rx,
+    logoUrl: p.logo_url,
+    description: p.description,
+    openingHours: p.opening_hours,
+    paymentMethods: Array.isArray(p.payment_methods) ? p.payment_methods : [],
+    instagram: p.instagram
   }));
 };
 
 export const fetchPharmacyById = async (id: string): Promise<Pharmacy | null> => {
-  const { data, error } = await supabase.from('pharmacies').select('*').eq('id', id).single();
-  if (error || !data) return null;
+  if (!id) return null;
+  const res = await safeQuery(async () => supabase.from('pharmacies').select('*').eq('id', id).single());
+  const data = res?.data;
+  if (!data) return null;
   return {
-    id: data.id, name: data.name, nif: data.nif, address: data.address || 'Pendente',
-    rating: data.rating, deliveryFee: data.delivery_fee, minTime: data.min_time,
-    isAvailable: data.is_available, status: data.status, ownerEmail: data.owner_email,
-    commissionRate: data.commission_rate, phone: data.phone, distance: 'N/A'
+    id: data.id, 
+    name: data.name, 
+    nif: data.nif, 
+    address: data.address || 'Pendente',
+    rating: Number(data.rating), 
+    deliveryFee: Number(data.delivery_fee), 
+    minTime: data.min_time,
+    isAvailable: !!data.is_available,
+    deliveryActive: !!(data.delivery_active ?? true),
+    status: data.status, 
+    ownerEmail: data.owner_email,
+    commissionRate: data.commission_rate, 
+    phone: data.phone, 
+    distance: 'N/A',
+    review_score: data.review_score,
+    receives_low_conf_rx: data.receives_low_conf_rx,
+    logoUrl: data.logo_url,
+    description: data.description,
+    openingHours: data.opening_hours,
+    paymentMethods: Array.isArray(data.payment_methods) ? data.payment_methods : [],
+    instagram: data.instagram
   };
 };
 
 export const updatePharmacyDetails = async (id: string, input: PharmacyInput): Promise<boolean> => {
-  const { error } = await supabase.from('pharmacies').update({
-    name: input.name, nif: input.nif, address: input.address,
-    delivery_fee: input.deliveryFee, min_time: input.minTime, phone: input.phone
-  }).eq('id', id);
-  return !error;
+  const res = await safeQuery(async () => supabase.from('pharmacies').update({
+    name: input.name, 
+    nif: input.nif, 
+    address: input.address,
+    delivery_fee: input.deliveryFee, 
+    min_time: input.minTime, 
+    phone: input.phone,
+    logo_url: input.logoUrl,
+    description: input.description,
+    opening_hours: input.openingHours,
+    payment_methods: input.paymentMethods || [],
+    instagram: input.instagram
+  }).eq('id', id));
+  return !!res && !res.error;
 };
 
+// FIX: Update puro sem select() para forçar gravação ignorando cache de schema
 export const togglePharmacyAvailability = async (id: string, isAvailable: boolean): Promise<boolean> => {
-  const { error = null } = await supabase.from('pharmacies').update({ is_available: isAvailable }).eq('id', id);
-  return !error;
+  if (!id) return false;
+  const { error } = await supabase.from('pharmacies')
+      .update({ is_available: isAvailable })
+      .eq('id', id);
+  
+  if (error) {
+      console.error("ERRO GRAVAÇÃO DISPONIBILIDADE:", error.message);
+      return false;
+  }
+  return true;
+};
+
+export const togglePharmacyDelivery = async (id: string, active: boolean): Promise<boolean> => {
+  if (!id) return false;
+  const { error } = await supabase.from('pharmacies')
+      .update({ delivery_active: active })
+      .eq('id', id);
+
+  if (error) {
+      console.error("ERRO GRAVAÇÃO DELIVERY:", error.message);
+      return false;
+  }
+  return true;
 };
 
 export const updateCommissionStatusByPharmacy = async (pharmacyId: string, month: string, year: number, status: CommissionStatus): Promise<boolean> => {
-    // Busca todas as ordens concluídas daquele mês/ano
     const startDate = new Date(year, parseInt(month) - 1, 1).toISOString();
     const endDate = new Date(year, parseInt(month), 0, 23, 59, 59).toISOString();
 
-    const { error } = await supabase.from('orders')
+    const res = await safeQuery(async () => supabase.from('orders')
         .update({ commission_status: status })
         .eq('pharmacy_id', pharmacyId)
         .eq('status', 'Concluído')
         .gte('created_at', startDate)
-        .lte('created_at', endDate);
+        .lte('created_at', endDate));
     
-    return !error;
+    return !!res && !res.error;
 };
 
 export const fetchFinancialReport = async (): Promise<PharmacyFinancials[]> => {
@@ -94,13 +164,11 @@ export const fetchFinancialReport = async (): Promise<PharmacyFinancials[]> => {
             
             const totalSales = completedOrders.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
             
-            // Taxas totais
             const totalFees = completedOrders.reduce((acc, o) => {
                 const comm = o.commission_amount ?? (Number(o.total) * (p.commission_rate || 10) / 100);
                 return acc + Number(comm);
             }, 0);
 
-            // Taxas pagas (auditadas pelo Admin)
             const paidFees = completedOrders
                 .filter(o => o.commission_status === 'PAID')
                 .reduce((acc, o) => acc + Number(o.commission_amount || 0), 0);
@@ -137,12 +205,21 @@ export const deletePharmacy = async (id: string): Promise<boolean> => {
 };
 
 export const getAdminStats = async () => {
-    const { count: u } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
-    const { count: p } = await supabase.from('pharmacies').select('*', { count: 'exact', head: true });
-    const today = new Date().toISOString().split('T')[0];
-    const { data: ordersToday } = await supabase.from('orders').select('total').gte('created_at', today);
-    const totalRevenue = (ordersToday || []).reduce((acc, o) => acc + (Number(o.total) || 0), 0);
-    return { users: u || 0, pharmacies: p || 0, ordersToday: ordersToday?.length || 0, totalRevenue: totalRevenue };
+    const res = await safeQuery(async () => {
+        const users = supabase.from('profiles').select('*', { count: 'exact', head: true });
+        const pharms = supabase.from('pharmacies').select('*', { count: 'exact', head: true });
+        const today = new Date().toISOString().split('T')[0];
+        const orders = supabase.from('orders').select('total').gte('created_at', today);
+        
+        const [u, p, o] = await Promise.all([users, pharms, orders]);
+        return { 
+            users: u.count || 0, 
+            pharmacies: p.count || 0, 
+            ordersToday: o.data?.length || 0, 
+            totalRevenue: (o.data || []).reduce((acc, item) => acc + (Number(item.total) || 0), 0)
+        };
+    });
+    return res || { users: 0, pharmacies: 0, ordersToday: 0, totalRevenue: 0 };
 };
 
 export const updatePharmacyCommission = async (id: string, rate: number): Promise<boolean> => {

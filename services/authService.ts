@@ -34,7 +34,7 @@ export const signUpPartner = async (name: string, email: string, password: strin
 
     return { user: { id: authData.user.id, name, email, role: UserRole.PHARMACY, pharmacyId: newPharm.id, phone }, error: null };
   } catch (error: any) {
-    return { user: null, error: error.message };
+    return { user: null, error: error.message || 'Falha no cadastro.' };
   }
 };
 
@@ -55,7 +55,7 @@ export const signUpUser = async (name: string, email: string, password: string, 
 
     return { user: { id: authData.user!.id, name, email: cleanEmail, phone, role: finalRole }, error: null };
   } catch (error: any) {
-    return { user: null, error: error.message };
+    return { user: null, error: error.message || 'Falha no cadastro.' };
   }
 };
 
@@ -67,111 +67,95 @@ export const signInUser = async (email: string, password: string): Promise<{ use
 
     const userId = authData.user!.id;
 
+    // Reparo imediato pós-login
     if (cleanEmail === 'jossdemo@gmail.com') {
-        await supabase.from('profiles').upsert({
-            id: userId,
-            email: cleanEmail,
-            name: 'Administrador FarmoLink',
-            role: UserRole.ADMIN
-        });
+        await supabase.from('profiles').update({ role: UserRole.ADMIN, pharmacy_id: null }).eq('id', userId);
     } else {
-        const { data: pharm } = await supabase
-            .from('pharmacies')
-            .select('id, name')
-            .eq('owner_email', cleanEmail)
-            .maybeSingle();
-
+        const { data: pharm } = await supabase.from('pharmacies').select('id').eq('owner_email', cleanEmail).maybeSingle();
         if (pharm) {
-            await supabase.from('profiles').upsert({
-                id: userId,
-                email: cleanEmail,
-                role: UserRole.PHARMACY,
-                pharmacy_id: pharm.id
-            });
+            await supabase.from('profiles').update({ role: UserRole.PHARMACY, pharmacy_id: pharm.id }).eq('id', userId);
         }
     }
 
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', userId).single();
-    if (!profile) throw new Error("Perfil não pôde ser recuperado ou criado.");
+    if (!profile) throw new Error("Perfil inacessível.");
 
     return { 
-      user: { 
-        id: profile.id, 
-        name: profile.name || 'Usuário', 
-        email: profile.email, 
-        phone: profile.phone, 
-        address: profile.address, 
-        role: (profile.role as UserRole) || UserRole.CUSTOMER, 
-        pharmacyId: profile.pharmacy_id 
-      }, 
+      user: { id: profile.id, name: profile.name || 'Usuário', email: profile.email, phone: profile.phone, address: profile.address, role: (profile.role as UserRole), pharmacyId: profile.pharmacy_id }, 
       error: null 
     };
   } catch (error: any) {
-    return { user: null, error: error.message };
+    return { user: null, error: error.message || 'Credenciais inválidas.' };
   }
 };
 
-/**
- * ENCERRAMENTO DE SESSÃO SEGURO E INCONDICIONAL
- * Garante que o usuário saia mesmo se o token estiver expirado ou sem internet.
- */
 export const signOutUser = async () => {
-  try {
-    // Tenta avisar o servidor, mas com timeout curto para não travar
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2000);
-    await supabase.auth.signOut();
-    clearTimeout(timeout);
-  } catch (e) {
-    console.warn("Aviso de logout ao servidor falhou ou expirou. Limpando localmente.");
-  }
-  
-  // Limpeza local OBRIGATÓRIA (isso tira o usuário da tela mesmo offline)
+  await supabase.auth.signOut();
   clearAllCache();
   localStorage.clear();
-  sessionStorage.clear();
-  
-  // Remove especificamente o token do Supabase se o clear geral falhar por algum motivo de permissão
-  localStorage.removeItem('farmolink-auth-token');
-  
-  console.log("🔒 Logout Seguro Concluído.");
+};
+
+export const resetPassword = async (email: string): Promise<{ success: boolean, message: string }> => {
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/update-password`,
+    });
+    if (error) throw error;
+    return { success: true, message: 'Link enviado com sucesso.' };
+  } catch (error: any) {
+    return { success: false, message: error.message };
+  }
+};
+
+export const updateUserPassword = async (password: string): Promise<{ success: boolean, error?: string }> => {
+  try {
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) throw error;
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
 };
 
 export const getCurrentUser = async (): Promise<User | null> => {
-  const session = await safeQuery(async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      return session;
-  });
+  const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user) return null;
 
-  const email = session.user.email?.toLowerCase().trim() || '';
-  let { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
+  const authUser = session.user;
+  const email = authUser.email?.toLowerCase().trim() || '';
+  
+  // VERIFICAÇÃO DE INTEGRIDADE ANTES DE RETORNAR
+  // Busca se este email é dono de uma farmácia
+  const { data: pharm } = await supabase.from('pharmacies').select('id').eq('owner_email', email).maybeSingle();
+  
+  let currentRole = UserRole.CUSTOMER;
+  let currentPharmId = null;
 
-  if (!profile) {
-      if (email === 'jossdemo@gmail.com') {
-          await supabase.from('profiles').insert({ id: session.user.id, email, name: 'Admin', role: UserRole.ADMIN });
-      } else {
-          const { data: pharm } = await supabase.from('pharmacies').select('id').eq('owner_email', email).maybeSingle();
-          if (pharm) {
-              await supabase.from('profiles').insert({ id: session.user.id, email, role: UserRole.PHARMACY, pharmacy_id: pharm.id });
-          } else {
-              await supabase.from('profiles').insert({ id: session.user.id, email, role: UserRole.CUSTOMER });
-          }
-      }
-      const { data: newProfile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
-      profile = newProfile;
+  if (email === 'jossdemo@gmail.com') {
+      currentRole = UserRole.ADMIN;
+  } else if (pharm) {
+      currentRole = UserRole.PHARMACY;
+      currentPharmId = pharm.id;
   }
 
-  if (!profile) return null;
+  // Sincroniza o perfil no banco silenciosamente se estiver diferente
+  const { data: profile } = await supabase.from('profiles').select('*').eq('id', authUser.id).single();
+  
+  if (profile && (profile.role !== currentRole || profile.pharmacy_id !== currentPharmId)) {
+      await supabase.from('profiles').update({ role: currentRole, pharmacy_id: currentPharmId }).eq('id', authUser.id);
+  } else if (!profile) {
+      // Se o perfil sumiu na migração, recria agora
+      await supabase.from('profiles').upsert({ id: authUser.id, email, role: currentRole, pharmacy_id: currentPharmId, name: authUser.user_metadata?.name || 'Usuário' });
+  }
 
   return { 
-    id: profile.id, 
-    name: profile.name || '', 
-    email: profile.email, 
-    phone: profile.phone, 
-    address: profile.address, 
-    role: profile.role as UserRole, 
-    pharmacyId: profile.pharmacy_id 
+    id: authUser.id, 
+    name: profile?.name || authUser.user_metadata?.name || 'Usuário', 
+    email: email, 
+    phone: profile?.phone || '', 
+    address: profile?.address || '', 
+    role: currentRole, 
+    pharmacyId: currentPharmId as any
   };
 };
 
@@ -193,32 +177,9 @@ export const adminUpdateUser = async (userId: string, data: { name: string, phon
 };
 
 export const fetchAllUsers = async (): Promise<User[]> => {
-    const data = await safeQuery(async () => {
-        const { data } = await supabase.from('profiles').select('*');
-        return data;
-    });
-    return (data || []).map((p: any) => ({ id: p.id, name: p.name, email: p.email, phone: p.phone, address: p.address, role: p.role, pharmacyId: p.pharmacy_id }));
-};
-
-export const resetCustomerData = async (userId: string, customerName: string): Promise<boolean> => {
-    try {
-        await supabase.from('prescriptions').delete().eq('customer_id', userId);
-        await supabase.from('orders').delete().eq('customer_name', customerName);
-        return true;
-    } catch (e) { return false; }
-};
-
-export const resetPassword = async (email: string): Promise<{ success: boolean, message: string }> => {
-  try {
-    const { error } = await supabase.auth.resetPasswordForEmail(email.toLowerCase().trim(), { redirectTo: window.location.origin });
-    if (error) throw error;
-    return { success: true, message: 'Link enviado!' };
-  } catch (error: any) { return { success: false, message: error.message }; }
-};
-
-export const updateUserPassword = async (newPassword: string): Promise<{ success: boolean, error?: string }> => {
-    try {
-        const { error } = await supabase.auth.updateUser({ password: newPassword });
-        return { success: !error, error: error?.message };
-    } catch (error: any) { return { success: false, error: error.message }; }
+    const res = await safeQuery(async () => supabase.from('profiles').select('*'));
+    return (res?.data || []).map((p: any) => ({ 
+        id: p.id, name: p.name, email: p.email, phone: p.phone, 
+        address: p.address, role: p.role, pharmacyId: p.pharmacy_id 
+    }));
 };

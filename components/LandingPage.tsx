@@ -10,7 +10,6 @@ interface LandingPageProps {
     onLoginClick: () => void;
 }
 
-// Banners padrão para garantir que o carrossel sempre apareça
 const DEFAULT_SLIDES: CarouselSlide[] = [
     {
         id: 'default-1',
@@ -43,7 +42,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
             setLoading(true);
             try {
                 const content = await fetchLandingContent();
-                // Se o banco retornar slides, usamos eles. Se não, mantemos os padrões.
                 if (content.slides && content.slides.length > 0) {
                     setSlides(content.slides);
                 }
@@ -66,7 +64,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
         resetTimeout();
         timeoutRef.current = setTimeout(() => {
             setCurrentSlide((prev) => (prev === slides.length - 1 ? 0 : prev + 1));
-        }, 60000); // 6 segundos por slide
+        }, 8000); 
 
         return () => resetTimeout();
     }, [currentSlide, isPaused, slides.length]);
@@ -87,7 +85,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
                 onLoginClick={onLoginClick}
             />
 
-            {/* CARROSSEL PRINCIPAL - SEMPRE VISÍVEL */}
             <div 
                 className="relative h-[500px] md:h-[650px] w-full overflow-hidden bg-gray-900 text-white mt-[64px]"
                 onMouseEnter={() => setIsPaused(true)}
@@ -124,29 +121,30 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
                     ))}
                 </div>
 
-                {/* CONTROLES DO CARROSSEL */}
+                {/* CONTROLES DISCRETOS E FLUTUANTES NA BASE - REDESIGN */}
                 {slides.length > 1 && (
-                    <>
-                        <button onClick={prevSlide} className="absolute left-6 top-1/2 -translate-y-1/2 z-30 p-4 rounded-2xl bg-white/10 hover:bg-emerald-600 backdrop-blur-md text-white transition-all border border-white/20">
-                            <ChevronLeft size={28}/>
+                    <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-30 flex items-center gap-6 bg-black/30 backdrop-blur-xl px-8 py-3.5 rounded-full border border-white/20 shadow-2xl">
+                        <button onClick={prevSlide} className="text-white/50 hover:text-white transition-all hover:scale-110 active:scale-90">
+                            <ChevronLeft size={24}/>
                         </button>
-                        <button onClick={nextSlide} className="absolute right-6 top-1/2 -translate-y-1/2 z-30 p-4 rounded-2xl bg-white/10 hover:bg-emerald-600 backdrop-blur-md text-white transition-all border border-white/20">
-                            <ChevronRight size={28}/>
-                        </button>
-                        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-30 flex gap-3">
+                        
+                        <div className="flex gap-2.5">
                             {slides.map((_, idx) => (
                                 <button 
                                     key={idx} 
                                     onClick={() => setCurrentSlide(idx)}
-                                    className={`h-3 rounded-full transition-all duration-500 ${currentSlide === idx ? 'w-12 bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)]' : 'w-3 bg-white/30 hover:bg-white'}`}
+                                    className={`h-2.5 rounded-full transition-all duration-500 ${currentSlide === idx ? 'w-10 bg-emerald-400' : 'w-2.5 bg-white/20 hover:bg-white/40'}`}
                                 />
                             ))}
                         </div>
-                    </>
+
+                        <button onClick={nextSlide} className="text-white/50 hover:text-white transition-all hover:scale-110 active:scale-90">
+                            <ChevronRight size={24}/>
+                        </button>
+                    </div>
                 )}
             </div>
 
-            {/* SEÇÃO DE FUNCIONALIDADES */}
             <section className="py-24 bg-gray-50">
                 <div className="container mx-auto px-6">
                     <div className="text-center max-w-3xl mx-auto mb-16">
@@ -174,7 +172,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick }) => {
                 </div>
             </section>
 
-            {/* PARCEIROS */}
             {partners.length > 0 && (
                 <section className="py-16 bg-white border-t border-gray-50">
                     <div className="container mx-auto px-6">

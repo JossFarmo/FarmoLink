@@ -5,6 +5,22 @@ export enum UserRole {
   ADMIN = 'ADMIN'
 }
 
+export enum OrderStatus {
+  PENDING = 'Pendente',
+  PREPARING = 'Preparando',
+  OUT_FOR_DELIVERY = 'Saiu para Entrega',
+  READY_FOR_PICKUP = 'Pronto para Retirada',
+  COMPLETED = 'Concluído',
+  CANCELLED = 'Cancelado',
+  REJECTED = 'Recusado'
+}
+
+export type PrescriptionStatus = 'ANALYZING' | 'UNDER_REVIEW' | 'WAITING_FOR_QUOTES' | 'COMPLETED' | 'EXPIRED' | 'CANCELLED' | 'ILLEGIBLE';
+
+export type CommissionStatus = 'PENDING' | 'WAITING_APPROVAL' | 'PAID';
+
+export type ProductUnitType = 'Caixa' | 'Lâmina' | 'Frasco' | 'Unidade' | 'Tubo' | 'Saqueta';
+
 export interface User {
   id: string;
   name: string;
@@ -15,6 +31,7 @@ export interface User {
   pharmacyId?: string;
   status?: 'ACTIVE' | 'BLOCKED';
   createdAt?: string;
+  pdpaConsent?: boolean;
 }
 
 export interface Pharmacy {
@@ -26,53 +43,23 @@ export interface Pharmacy {
   deliveryFee: number;
   minTime: string;
   isAvailable: boolean;
+  deliveryActive: boolean;
   status: string;
   ownerEmail: string;
   commissionRate?: number;
   phone?: string;
   distance?: string;
-}
-
-export interface PharmacyInput {
-  name: string;
-  nif: string;
-  address: string;
-  deliveryFee: number;
-  minTime: string;
-  rating: number;
-  phone: string;
-}
-
-export interface PharmacyFinancials {
-  id: string;
-  name: string;
-  commissionRate: number;
-  stats: {
-    totalSales: number;
-    platformFees: number;
-    netEarnings: number;
-    pendingClearance: number;
-    paidFees: number;
-    unpaidFees: number;
-  }
-}
-
-export interface MonthlyStatement {
-    month: string;
-    year: number;
-    totalSales: number;
-    commissionDue: number;
-    status: 'OPEN' | 'PENDING_APPROVAL' | 'SETTLED';
-}
-
-export interface GlobalProduct {
-    id: string;
-    name: string;
-    description: string;
-    category: string;
-    image: string;
-    common: boolean; 
-    referencePrice?: number;
+  distanceKm?: number; 
+  latitude?: number;
+  longitude?: number;
+  receives_low_conf_rx?: boolean; 
+  review_score?: number;
+  triage_count?: number; 
+  logoUrl?: string;
+  description?: string;
+  openingHours?: string; 
+  paymentMethods?: string[]; 
+  instagram?: string;
 }
 
 export interface Product {
@@ -85,62 +72,21 @@ export interface Product {
   requiresPrescription: boolean;
   stock: number;
   category?: string; 
-  globalProductId?: string; 
+  globalProductId?: string;
+  isPromotion?: boolean;
+  discountPrice?: number;
+  unitType?: ProductUnitType; // NOVO CAMPO: Unidade de Venda (Lâmina, Caixa, etc)
 }
-
-export const PRODUCT_CATEGORIES = [
-    "Alergias e Reações Alérgicas",
-    "Antibióticos e Antimicrobianos",
-    "Antimaláricos e Doenças Tropicais",
-    "Antiparasitários e Vermífugos",
-    "Dermatologia e Cuidados com a Pele",
-    "Diabetes e Controlo da Glicemia",
-    "Dor, Febre e Inflamação",
-    "Gravidez e Fertilidade",
-    "Gripe, Tosse e Constipações",
-    "Higiene e Cuidados Pessoais",
-    "Hormonas e Endocrinologia",
-    "Material Médico e Hospitalar",
-    "Oftalmologia (Olhos)",
-    "Oncologia e Tratamentos Especiais",
-    "Otorrinolaringologia (Ouvidos/Nariz)",
-    "Pressão Arterial e Coração",
-    "Primeiros Socorros e Emergência",
-    "Produtos Naturais e Fitoterápicos",
-    "Saúde Digestiva (Estômago e Intestinos)",
-    "Saúde Feminina",
-    "Saúde Infantil e Pediátrica",
-    "Saúde Masculina",
-    "Saúde Mental e Neurologia",
-    "Saúde Respiratória",
-    "Testes Rápidos e Diagnóstico",
-    "Uso Veterinário",
-    "Vacinas e Imunização",
-    "Vitaminas, Minerais e Suplementos",
-    "Outros / Uso Especial"
-];
 
 export interface CartItem extends Product {
   quantity: number;
 }
 
-export enum OrderStatus {
-  PENDING = 'Pendente',
-  CONFIRMED = 'Confirmado',
-  PREPARING = 'Em Preparação',
-  OUT_FOR_DELIVERY = 'Saiu para Entrega',
-  READY_FOR_PICKUP = 'Pronto para Retirada',
-  COMPLETED = 'Concluído',
-  CANCELLED = 'Cancelado pelo Cliente',
-  REJECTED = 'Cancelado pela Farmácia'
-}
-
-export type CommissionStatus = 'PENDING' | 'WAITING_APPROVAL' | 'PAID';
-
 export interface Order {
   id: string;
+  customerId?: string; // ID do utente (profile) — usado para isolar pedidos por cliente
   customerName: string;
-  customerPhone?: string; 
+  customerPhone?: string;
   items: CartItem[];
   total: number;
   status: OrderStatus;
@@ -152,16 +98,30 @@ export interface Order {
   commissionStatus?: CommissionStatus;
 }
 
-export interface QuotedItem {
-  name: string;
-  quantity: number;
-  price: number;
-  available: boolean;
+export interface PrescriptionRequest {
+  id: string;
+  customerId: string;
+  imageUrl: string;
+  date: string;
+  status: PrescriptionStatus;
+  targetPharmacies: string[]; 
+  notes?: string;
+  quotes?: PrescriptionQuote[]; 
+  image_hash?: string;
+  ai_metadata?: {
+    confidence: number;
+    extracted_text: string;
+    is_validated: boolean;
+    validated_by?: string; 
+    suggested_items: { name: string, quantity: number }[];
+  };
+  triaged_at?: string;
+  expires_at?: string;
 }
 
 export interface PrescriptionQuote {
   id: string;
-  prescriptionId: string;
+  prescription_id: string;
   pharmacyId: string;
   pharmacyName: string;
   items: QuotedItem[];
@@ -169,26 +129,17 @@ export interface PrescriptionQuote {
   deliveryFee: number;
   status: 'RESPONDED' | 'REJECTED' | 'ACCEPTED';
   notes?: string;
-  rejectionReason?: string;
   createdAt: string;
 }
 
-export interface PrescriptionRequest {
-  id: string;
-  customerId: string;
-  imageUrl: string;
-  date: string;
-  status: string;
-  targetPharmacies: string[]; 
-  notes?: string;
-  quotes?: PrescriptionQuote[]; 
-}
-
-export interface DashboardStats {
-  totalOrders: number;
-  revenue: number;
-  pendingOrders: number;
-  productsCount: number;
+export interface QuotedItem {
+  name: string;
+  quantity: number;
+  price: number;
+  available: boolean;
+  isMatched?: boolean;
+  unitType?: string; 
+  productId?: string; // CAMPO CRÍTICO: ID Real do produto para baixar stock
 }
 
 export interface Notification {
@@ -217,3 +168,81 @@ export interface Partner {
   logoUrl: string;
   active: boolean;
 }
+
+export interface ChatMessage {
+  role: 'user' | 'model';
+  content: string;
+}
+
+export interface PharmacyFinancials {
+  id: string;
+  name: string;
+  commissionRate: number;
+  stats: {
+    totalSales: number;
+    platformFees: number;
+    netEarnings: number;
+    pendingClearance: number;
+    paidFees: number;
+    unpaidFees: number;
+  };
+}
+
+export interface GlobalProduct {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  image: string;
+  common: boolean;
+  referencePrice: number;
+}
+
+export interface PharmacyInput {
+  name: string;
+  nif?: string;
+  address: string;
+  deliveryFee: number;
+  minTime: string;
+  rating: number;
+  phone?: string;
+  logoUrl?: string;
+  description?: string;
+  openingHours?: string;
+  paymentMethods?: string[];
+  instagram?: string;
+}
+
+export const PRODUCT_CATEGORIES = [
+    "Alergias e Reações Alérgicas",
+    "Antibióticos e Antimicrobianos",
+    "Antimaláricos e Doenças Tropicais",
+    "Antiparasitários e Vermífugos",
+    "Dermatologia e Cuidados com a Pele",
+    "Diabetes e Controlo da Glicemia",
+    "Dor, Feve e Inflamação",
+    "Gravidez e Fertilidade",
+    "Gripe, Tosse e Constipações",
+    "Higiene e Cuidados Pessoais",
+    "Hormonas e Endocrinologia",
+    "Material Médico e Hospitalar",
+    "Oftalmologia (Olhos)",
+    "Oncologia e Tratamentos Especiais",
+    "Otorrinolaringologia (Ouvidos/Nariz)",
+    "Pressão Arterial e Coração",
+    "Primeiros Socorros e Emergência",
+    "Produtos Naturais e Fitoterápicos",
+    "Saúde Digestiva (Estômago e Intestinos)",
+    "Saúde Feminina",
+    "Saúde Infantil e Pediátrica",
+    "Saúde Masculina",
+    "Saúde Mental e Neurologia",
+    "Saúde Respiratória",
+    "Testes Rápidos e Diagnóstico",
+    "Uso Veterinário",
+    "Vacinas e Imunização",
+    "Vitaminas, Minerais e Suplementos",
+    "Outros / Uso Especial"
+];
+
+export const UNIT_TYPES: ProductUnitType[] = ['Caixa', 'Lâmina', 'Frasco', 'Unidade', 'Tubo', 'Saqueta'];
