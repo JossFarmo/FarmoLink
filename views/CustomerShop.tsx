@@ -9,49 +9,21 @@ import { fetchProducts } from '../services/productService';
 import { formatDistance, getCurrentPosition } from '../services/locationService';
 
 const optimizeImg = (url: string) => {
-    if (!url || !url.includes('cloudinary')) return url || 'https://cdn-icons-png.flaticon.com/512/883/883407.png';
+    if (!url.includes('cloudinary')) return url;
     return url.replace('/upload/', '/upload/q_auto,f_auto,w_400/');
 };
 
-// --- FIX 2: NORMALIZAÇÃO E TOKENIZAÇÃO PARA BUSCA FLEXÍVEL ---
-const normalizeForSearch = (t: string) => 
-    t.normalize("NFD")
-     .replace(/[\u0300-\u036f]/g, "")
-     .toLowerCase()
-     .replace(/[^a-z0-9\s]/g, '')
-     .trim();
+const normalizeText = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 
 export const HomeView = ({ products, pharmacies, onAddToCart, onNavigate, onViewPharmacy }: any) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeCategory, setActiveCategory] = useState('Todos');
   const [page, setPage] = useState(0);
   const [extraProducts, setExtraProducts] = useState<Product[]>([]);
-  const [searchResults, setSearchResults] = useState<Product[] | null>(null);
-  const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
 
-  // --- FIX 3: BUSCA SERVER-SIDE EM TEMPO REAL ---
-  useEffect(() => {
-      const delaySearch = setTimeout(async () => {
-          if (searchTerm.trim().length >= 2) {
-              setLoading(true);
-              // Busca no servidor usando o termo de pesquisa
-              const results = await fetchProducts(undefined, 0, 40, searchTerm);
-              setSearchResults(results);
-              setLoading(false);
-          } else {
-              setSearchResults(null);
-          }
-      }, 400);
-
-      return () => clearTimeout(delaySearch);
-  }, [searchTerm]);
-
-  const allVisibleProducts = useMemo(() => {
-      if (searchResults !== null) return searchResults;
-      return [...products, ...extraProducts];
-  }, [products, extraProducts, searchResults]);
+  const allVisibleProducts = useMemo(() => [...products, ...extraProducts], [products, extraProducts]);
 
   const topPharmacies = useMemo(() => {
       return [...pharmacies]
@@ -64,25 +36,15 @@ export const HomeView = ({ products, pharmacies, onAddToCart, onNavigate, onView
   }, [pharmacies]);
 
   const filteredProducts = useMemo(() => {
-    // Se estivermos em modo de resultados de pesquisa (Server-Side), apenas aplicamos o filtro de categoria se necessário
-    if (searchResults !== null) {
-        return searchResults.filter(p => activeCategory === 'Todos' || p.category === activeCategory);
-    }
-
-    // Caso contrário, busca local no cache atual
-    const searchTokens = normalizeForSearch(searchTerm).split(' ').filter(t => t.length > 0);
-    
     return allVisibleProducts.filter((p: Product) => {
         const matchCat = activeCategory === 'Todos' || p.category === activeCategory;
-        const normalizedName = normalizeForSearch(p.name);
-        // Verifica se TODOS os tokens estão presentes no nome (ordem não importa)
-        const matchSearch = searchTokens.length === 0 || searchTokens.every(token => normalizedName.includes(token));
+        const matchSearch = !searchTerm || normalizeText(p.name).includes(normalizeText(searchTerm));
         return matchCat && matchSearch;
     });
-  }, [allVisibleProducts, searchTerm, activeCategory, searchResults]);
+  }, [allVisibleProducts, searchTerm, activeCategory]);
 
   const loadMore = async () => {
-      if (loadingMore || searchResults !== null) return;
+      if (loadingMore) return;
       setLoadingMore(true);
       const nextPage = page + 1;
       const data = await fetchProducts(undefined, nextPage);
@@ -128,7 +90,7 @@ export const HomeView = ({ products, pharmacies, onAddToCart, onNavigate, onView
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {topPharmacies.map((p: Pharmacy) => (
-                  <div key={p.id} onClick={() => onViewPharmacy(p.id)} className="bg-white p-5 rounded-[32px] border border-gray-100 shadow-sm hover:shadow-xl transition-all cursor-pointer group relative overflow-hidden h-full flex flex-col">
+                  <div key={p.id} onClick={() => onViewPharmacy(p.id)} className="bg-white p-5 rounded-[32px] border border-gray-100 shadow-sm hover:shadow-xl transition-all cursor-pointer group relative overflow-hidden">
                       <div className="flex justify-between items-start mb-4">
                           <div className="w-10 h-10 bg-emerald-50 text-emerald-700 rounded-xl flex items-center justify-center font-black text-lg">{p.name.charAt(0)}</div>
                           {p.distanceKm ? (
@@ -137,7 +99,7 @@ export const HomeView = ({ products, pharmacies, onAddToCart, onNavigate, onView
                               </span>
                           ) : <Sparkles size={14} className="text-yellow-400" />}
                       </div>
-                      <h4 className="font-black text-gray-800 text-sm truncate mb-auto">{p.name}</h4>
+                      <h4 className="font-black text-gray-800 text-sm truncate">{p.name}</h4>
                       <div className="flex flex-col gap-1 mt-2">
                           <div className="flex items-center gap-1">
                               <Star size={10} className="fill-yellow-400 text-yellow-400"/>
@@ -156,52 +118,38 @@ export const HomeView = ({ products, pharmacies, onAddToCart, onNavigate, onView
           </div>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar sticky top-16 bg-gray-100 z-30 pt-2">
+      <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
           {['Todos', ...PRODUCT_CATEGORIES.slice(0, 10)].map(c => (
               <button key={c} onClick={() => setActiveCategory(c)} className={`px-5 py-2.5 rounded-full text-xs font-bold transition-all whitespace-nowrap ${activeCategory === c ? 'bg-emerald-600 text-white shadow-md' : 'bg-white border text-gray-400 hover:border-emerald-300'}`}>{c}</button>
           ))}
       </div>
 
       <div className="space-y-4">
-          <div className="bg-white p-2 rounded-2xl border shadow-sm flex items-center gap-3 relative">
-              <Search className="text-emerald-500 ml-4" size={20}/>
-              <input 
-                placeholder="Ex: amo 250mg ou paracetamol..." 
-                className="w-full py-4 outline-none font-bold text-gray-700 uppercase placeholder:normal-case" 
-                value={searchTerm} 
-                onChange={e => setSearchTerm(e.target.value)}
-              />
-              {loading && <Loader2 className="animate-spin text-emerald-500 absolute right-6" size={20}/>}
+          <div className="bg-white p-2 rounded-2xl border shadow-sm flex items-center gap-3">
+              <Search className="text-gray-300 ml-4" size={20}/>
+              <input placeholder="Procurar medicamento..." className="w-full py-4 outline-none font-bold text-gray-700" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/>
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
               {filteredProducts.map((p: Product) => (
-                  <div key={p.id} onClick={() => onAddToCart(p)} className="bg-white p-4 rounded-3xl border shadow-sm hover:shadow-xl transition-all group flex flex-col cursor-pointer h-full">
+                  <div key={p.id} onClick={() => onAddToCart(p)} className="bg-white p-4 rounded-3xl border shadow-sm hover:shadow-xl transition-all group flex flex-col cursor-pointer">
                       <div className="aspect-square bg-gray-50 rounded-2xl mb-4 flex items-center justify-center p-4">
-                          <img src={optimizeImg(p.image)} className="max-h-full group-hover:scale-110 transition-transform object-contain" loading="lazy" alt={p.name} />
+                          <img src={optimizeImg(p.image)} className="max-h-full group-hover:scale-110 transition-transform" loading="lazy" alt={p.name} />
                       </div>
-                      <h4 className="font-bold text-gray-800 text-sm mb-4 flex-1 line-clamp-2 uppercase leading-tight">{formatProductNameForCustomer(p.name)}</h4>
-                      <p className="text-[9px] text-gray-400 font-bold mb-2 uppercase bg-gray-50 px-2 py-0.5 rounded w-fit">{p.unitType || 'Unidade'}</p>
+                      <h4 className="font-bold text-gray-800 text-sm mb-4 flex-1">{formatProductNameForCustomer(p.name)}</h4>
                       <div className="flex justify-between items-center pt-3 border-t">
                           <span className="font-black text-emerald-600">Kz {p.price.toLocaleString()}</span>
-                          <div className="bg-emerald-50 text-emerald-600 p-2 rounded-xl group-hover:bg-emerald-600 group-hover:text-white transition-all"><Plus size={18}/></div>
+                          <div className="bg-emerald-50 text-emerald-600 p-2 rounded-xl group-hover:bg-emerald-600 group-hover:text-white"><Plus size={18}/></div>
                       </div>
                   </div>
               ))}
           </div>
 
-          {searchResults === null && hasMore && !searchTerm && activeCategory === 'Todos' && (
+          {hasMore && !searchTerm && activeCategory === 'Todos' && (
               <div className="flex justify-center pt-10">
                   <button onClick={loadMore} disabled={loadingMore} className="px-12 py-4 bg-white border-2 border-emerald-600 text-emerald-600 rounded-3xl font-black text-xs uppercase tracking-widest hover:bg-emerald-50 transition-all flex items-center gap-3 shadow-lg">
                       {loadingMore ? <Loader2 className="animate-spin" size={18}/> : 'Carregar Mais'}
                   </button>
-              </div>
-          )}
-
-          {filteredProducts.length === 0 && !loading && searchTerm && (
-              <div className="p-20 text-center bg-white rounded-[40px] border border-dashed border-gray-200">
-                  <Search className="text-gray-100 mx-auto mb-4" size={60}/>
-                  <p className="text-gray-400 font-black uppercase text-sm">Não encontramos nenhum medicamento com este nome.</p>
               </div>
           )}
       </div>
@@ -212,7 +160,7 @@ export const HomeView = ({ products, pharmacies, onAddToCart, onNavigate, onView
 export const AllPharmaciesView = ({ pharmacies, onViewPharmacy }: any) => {
     const [q, setQ] = useState('');
     const filtered = pharmacies
-        .filter((p: Pharmacy) => normalizeForSearch(p.name).includes(normalizeForSearch(q)))
+        .filter((p: Pharmacy) => normalizeText(p.name).includes(normalizeText(q)))
         .sort((a: any, b: any) => {
             if (a.isAvailable !== b.isAvailable) return a.isAvailable ? -1 : 1;
             if (a.distanceKm && b.distanceKm) return a.distanceKm - b.distanceKm;
@@ -223,12 +171,12 @@ export const AllPharmaciesView = ({ pharmacies, onViewPharmacy }: any) => {
         <div className="space-y-8 animate-fade-in pb-20">
             <h1 className="text-3xl font-black text-gray-800">Farmácias Parceiras</h1>
             <div className="bg-white p-2 rounded-2xl border shadow-sm flex items-center gap-3 max-w-xl">
-                <Search className="text-emerald-500 ml-4" size={20}/>
-                <input placeholder="Pesquisar farmácia..." className="w-full py-4 outline-none font-bold text-gray-700 uppercase" value={q} onChange={e => setQ(e.target.value)}/>
+                <Search className="text-gray-300 ml-4" size={20}/>
+                <input placeholder="Pesquisar farmácia..." className="w-full py-4 outline-none font-bold text-gray-700" value={q} onChange={e => setQ(e.target.value)}/>
             </div>
             <div className="grid md:grid-cols-3 gap-6">
                 {filtered.map((p: Pharmacy) => (
-                    <div key={p.id} onClick={() => onViewPharmacy(p.id)} className="bg-white p-6 rounded-[32px] border hover:shadow-2xl cursor-pointer transition-all group h-full flex flex-col">
+                    <div key={p.id} onClick={() => onViewPharmacy(p.id)} className="bg-white p-6 rounded-[32px] border hover:shadow-2xl cursor-pointer transition-all group">
                         <div className="flex justify-between items-start mb-6">
                             <div className="w-12 h-12 bg-emerald-50 text-emerald-700 rounded-xl flex items-center justify-center font-black text-xl">{p.name.charAt(0)}</div>
                             <div className="flex flex-col items-end gap-1">
@@ -241,14 +189,14 @@ export const AllPharmaciesView = ({ pharmacies, onViewPharmacy }: any) => {
                         </div>
                         <h3 className="text-xl font-black text-gray-800 mb-2">{p.name}</h3>
                         <p className="text-xs text-gray-400 font-bold mb-6 truncate">{p.address}</p>
-                        <div className="flex justify-between items-center pt-6 border-t font-black mt-auto">
+                        <div className="flex justify-between items-center pt-6 border-t font-black">
                             <div className="flex flex-col">
                                 <span className="text-[10px] text-gray-400 uppercase">Taxa de Entrega</span>
                                 <span className={p.deliveryActive ? "text-emerald-600" : "text-gray-300 line-through"}>
                                     Kz {p.deliveryFee.toLocaleString()}
                                 </span>
                             </div>
-                            <ChevronRight className="text-gray-200 group-hover:text-emerald-600 transition-colors"/>
+                            <ChevronRight className="text-gray-200 group-hover:text-emerald-600"/>
                         </div>
                     </div>
                 ))}
@@ -257,6 +205,8 @@ export const AllPharmaciesView = ({ pharmacies, onViewPharmacy }: any) => {
     );
 };
 
+// --- NOVO COMPONENTE: PHARMACY PROFILE (ON-DEMAND) ---
+// Carrega produtos sob demanda (paginação + busca server-side) para economizar dados.
 export const PharmacyProfileView = ({ pharmacy, onAddToCart, onBack }: { pharmacy: Pharmacy, onAddToCart: (p: Product) => void, onBack: () => void }) => {
     const [products, setProducts] = useState<Product[]>([]);
     const [loading, setLoading] = useState(true);
@@ -265,10 +215,12 @@ export const PharmacyProfileView = ({ pharmacy, onAddToCart, onBack }: { pharmac
     const [hasMore, setHasMore] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
     
+    // Carregamento inicial (apenas primeiros 20)
     useEffect(() => {
         loadData(0, true);
     }, [pharmacy.id]);
 
+    // Delay na pesquisa para não disparar requests a cada letra
     useEffect(() => {
         const timer = setTimeout(() => {
             loadData(0, true);
@@ -280,22 +232,39 @@ export const PharmacyProfileView = ({ pharmacy, onAddToCart, onBack }: { pharmac
         if (reset) setLoading(true); else setLoadingMore(true);
         
         try {
+            // Busca no servidor com filtro de texto e paginação
             const data = await fetchProducts(pharmacy.id, targetPage, 20, searchTerm);
-            if (reset) { setProducts(data); setPage(0); } 
-            else { setProducts(prev => [...prev, ...data]); setPage(targetPage); }
-            if (data.length < 20) setHasMore(false); else setHasMore(true);
-        } catch (e) { console.error("Erro ao carregar farmácia", e); } 
-        finally { if (reset) setLoading(false); else setLoadingMore(false); }
+            
+            if (reset) {
+                setProducts(data);
+                setPage(0);
+            } else {
+                setProducts(prev => [...prev, ...data]);
+                setPage(targetPage);
+            }
+            
+            // Se veio menos que o limite, acabou a lista
+            if (data.length < 20) setHasMore(false);
+            else setHasMore(true);
+
+        } catch (e) {
+            console.error("Erro ao carregar farmácia", e);
+        } finally {
+            if (reset) setLoading(false); else setLoadingMore(false);
+        }
     };
 
-    const handleLoadMore = () => loadData(page + 1, false);
+    const handleLoadMore = () => {
+        loadData(page + 1, false);
+    };
 
     return (
         <div className="space-y-6 pb-20 animate-fade-in">
-            <button onClick={onBack} className="text-emerald-600 font-black text-xs uppercase mb-2 flex items-center gap-2 hover:translate-x-[-4px] transition-transform">
+            <button onClick={onBack} className="text-emerald-600 font-black text-xs uppercase mb-2 flex items-center gap-2">
                 <ArrowLeft size={16}/> Voltar para Lista
             </button>
 
+            {/* HEADER DA FARMÁCIA */}
             <div className="bg-white p-6 rounded-[32px] border border-gray-100 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                 <div>
                     <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tight mb-2">{pharmacy.name}</h2>
@@ -318,16 +287,18 @@ export const PharmacyProfileView = ({ pharmacy, onAddToCart, onBack }: { pharmac
                 )}
             </div>
 
-            <div className="bg-white p-2 rounded-2xl border shadow-sm flex items-center gap-3 sticky top-16 z-20">
+            {/* BARRA DE PESQUISA INTERNA (ON-DEMAND) */}
+            <div className="bg-white p-2 rounded-2xl border shadow-sm flex items-center gap-3 sticky top-20 z-20">
                 <Search className="text-emerald-500 ml-4" size={20}/>
                 <input 
-                    placeholder={`Procurar na ${pharmacy.name}...`} 
+                    placeholder={`Pesquisar na ${pharmacy.name}...`} 
                     className="w-full py-4 outline-none font-bold text-gray-700 uppercase placeholder:normal-case" 
                     value={searchTerm} 
                     onChange={e => setSearchTerm(e.target.value)}
                 />
             </div>
 
+            {/* LISTA DE PRODUTOS */}
             {loading ? (
                 <div className="p-20 text-center"><Loader2 className="animate-spin mx-auto text-emerald-600" size={40}/></div>
             ) : (
@@ -339,21 +310,21 @@ export const PharmacyProfileView = ({ pharmacy, onAddToCart, onBack }: { pharmac
                     ) : (
                         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
                             {products.map(p => (
-                                <div key={p.id} onClick={() => onAddToCart(p)} className="bg-white p-4 rounded-3xl border shadow-sm hover:shadow-md transition-all group flex flex-col cursor-pointer h-full">
+                                <div key={p.id} onClick={() => onAddToCart(p)} className="bg-white p-4 rounded-3xl border shadow-sm hover:shadow-md transition-all group flex flex-col cursor-pointer">
                                     <div className="aspect-square bg-gray-50 rounded-xl mb-3 flex items-center justify-center p-2 relative">
                                         <img src={optimizeImg(p.image)} className="max-h-full object-contain" loading="lazy" alt={p.name} />
-                                        {p.isPromotion && <span className="absolute top-2 right-2 bg-red-500 text-white text-[8px] font-black px-1.5 rounded shadow-sm">PROMO</span>}
+                                        {p.isPromotion && <span className="absolute top-2 right-2 bg-red-500 text-white text-[8px] font-black px-1.5 rounded">PROMO</span>}
                                     </div>
                                     <h4 className="font-bold text-gray-800 text-xs mb-1 flex-1 uppercase leading-tight line-clamp-2">{formatProductNameForCustomer(p.name)}</h4>
                                     <p className="text-[9px] text-gray-400 font-bold mb-2 uppercase bg-gray-50 px-2 py-0.5 rounded w-fit">{p.unitType || 'Unidade'}</p>
-                                    <div className="flex justify-between items-center pt-2 border-t mt-auto">
+                                    <div className="flex justify-between items-center pt-2 border-t">
                                         <div className="flex flex-col">
-                                            {p.isPromotion && <span className="text-[8px] text-gray-400 line-through">Kz {p.price.toLocaleString()}</span>}
+                                            {p.isPromotion && <span className="text-[8px] text-gray-400 line-through">Kz {p.price}</span>}
                                             <span className={`font-black text-sm ${p.isPromotion ? 'text-red-500' : 'text-emerald-600'}`}>
                                                 Kz {(p.isPromotion ? p.discountPrice : p.price)?.toLocaleString()}
                                             </span>
                                         </div>
-                                        <div className="bg-emerald-50 text-emerald-600 p-1.5 rounded-lg active:scale-95 group-hover:bg-emerald-600 group-hover:text-white transition-all"><Plus size={16}/></div>
+                                        <div className="bg-emerald-50 text-emerald-600 p-1.5 rounded-lg active:scale-95"><Plus size={16}/></div>
                                     </div>
                                 </div>
                             ))}
@@ -365,7 +336,7 @@ export const PharmacyProfileView = ({ pharmacy, onAddToCart, onBack }: { pharmac
                             <button 
                                 onClick={handleLoadMore} 
                                 disabled={loadingMore}
-                                className="px-8 py-3 bg-white border border-gray-200 rounded-2xl text-xs font-black uppercase tracking-widest text-gray-500 hover:text-emerald-600 hover:border-emerald-200 shadow-sm flex items-center gap-2 transition-all"
+                                className="px-8 py-3 bg-white border border-gray-200 rounded-2xl text-xs font-black uppercase tracking-widest text-gray-500 hover:text-emerald-600 hover:border-emerald-200 shadow-sm flex items-center gap-2"
                             >
                                 {loadingMore ? <Loader2 className="animate-spin" size={14}/> : <ChevronDown size={14}/>}
                                 Carregar Mais
@@ -389,8 +360,11 @@ export const CartView = ({ items, pharmacies, updateQuantity, onCheckout, userAd
     const fee = type === 'DELIVERY' ? (pharm?.deliveryFee || 0) : 0;
     const total = sub + fee;
 
+    // Se a farmácia não suportar entrega, forçamos o tipo PICKUP
     useEffect(() => {
-        if (pharm && !pharm.deliveryActive && type === 'DELIVERY') setType('PICKUP');
+        if (pharm && !pharm.deliveryActive && type === 'DELIVERY') {
+            setType('PICKUP');
+        }
     }, [pharm, type]);
 
     const handleUseGps = async () => {
@@ -398,22 +372,32 @@ export const CartView = ({ items, pharmacies, updateQuantity, onCheckout, userAd
         playSound('click');
         const pos = await getCurrentPosition();
         if (pos) {
-            setCurrentAddress(`Coordenadas: ${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)} (Localização Atual)`);
+            setCurrentAddress(`Coordenadas: ${pos.lat.toFixed(6)}, ${pos.lng.toFixed(6)} (Minha localização atual)`);
             playSound('success');
-        } else alert("Verifique as permissões de GPS.");
+        } else {
+            alert("Não foi possível aceder ao GPS. Verifique as permissões.");
+        }
         setIsLocating(false);
     };
 
     const handleConfirmCheckout = async () => { 
         if (isProcessing) return; 
-        if (type === 'DELIVERY' && !currentAddress) { alert("Indique a morada de entrega."); return; }
-        setIsProcessing(true); try { await onCheckout(type, currentAddress, total); } finally { setIsProcessing(false); } 
+        if (type === 'DELIVERY' && !currentAddress) {
+            alert("Por favor, insira a morada de entrega.");
+            return;
+        }
+        setIsProcessing(true); 
+        try { 
+            await onCheckout(type, currentAddress, total); 
+        } finally { 
+            setIsProcessing(false); 
+        } 
     };
 
     return (
-        <div className="max-w-4xl mx-auto py-10 animate-fade-in pb-32 px-4">
+        <div className="max-w-4xl mx-auto py-10 animate-fade-in pb-32">
             <button onClick={onBack} className="text-gray-400 font-black text-xs uppercase mb-6 flex items-center gap-2" disabled={isProcessing}><ArrowLeft size={16}/> Ver mais medicamentos</button>
-            <h2 className="text-3xl font-black text-gray-800 mb-8 tracking-tighter">Finalizar Pedido</h2>
+            <h2 className="text-3xl font-black text-gray-800 mb-8">Finalizar Pedido</h2>
             
             {items.length === 0 ? (
                 <div className="bg-white p-20 rounded-[40px] border border-dashed text-center flex flex-col items-center">
@@ -428,7 +412,7 @@ export const CartView = ({ items, pharmacies, updateQuantity, onCheckout, userAd
                             <div>
                                 <h3 className="font-black text-xl text-emerald-900">{pharm?.name}</h3>
                                 <p className="text-[10px] text-emerald-600 font-bold uppercase">
-                                    {pharm?.deliveryActive ? `Entrega em ${pharm?.minTime}` : 'Levantamento em Loja'}
+                                    {pharm?.deliveryActive ? `Entrega em ${pharm?.minTime}` : 'Apenas Levantamento em Loja'}
                                 </p>
                             </div>
                         </div>
@@ -437,14 +421,18 @@ export const CartView = ({ items, pharmacies, updateQuantity, onCheckout, userAd
                             <Card className="p-8 rounded-[40px] shadow-sm border-gray-100">
                                 <div className="flex justify-between items-center mb-6">
                                     <h4 className="text-sm font-black text-gray-800 uppercase tracking-widest flex items-center gap-2"><MapPin size={18} className="text-emerald-500"/> Local de Entrega</h4>
-                                    <button onClick={handleUseGps} disabled={isLocating} className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-1 bg-blue-50 px-3 py-2 rounded-xl hover:bg-blue-100 transition-all">
+                                    <button 
+                                        onClick={handleUseGps} 
+                                        disabled={isLocating}
+                                        className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-1 bg-blue-50 px-3 py-2 rounded-xl hover:bg-blue-100 transition-all"
+                                    >
                                         {isLocating ? <Loader2 className="animate-spin" size={12}/> : <Navigation size={12}/>}
-                                        Usar GPS
+                                        {isLocating ? 'Obtendo...' : 'Usar GPS'}
                                     </button>
                                 </div>
                                 <textarea 
                                     className="w-full p-4 bg-gray-50 border rounded-2xl outline-none focus:ring-4 focus:ring-emerald-50 font-medium text-sm transition-all min-h-[100px]" 
-                                    placeholder="Província, Município, Bairro, Rua e Prédio/Casa..."
+                                    placeholder="Descreva sua morada completa (Província, Município, Bairro...)"
                                     value={currentAddress}
                                     onChange={e => setCurrentAddress(e.target.value)}
                                 />
@@ -455,11 +443,11 @@ export const CartView = ({ items, pharmacies, updateQuantity, onCheckout, userAd
                             {items.map((it: any) => (
                                 <div key={it.id} className="bg-white p-5 rounded-3xl border flex items-center gap-4 shadow-sm">
                                     <img src={optimizeImg(it.image)} className="w-16 h-16 object-contain rounded-xl bg-gray-50 p-2" loading="lazy" alt={it.name} />
-                                    <div className="flex-1"><h4 className="font-bold text-gray-800 text-sm uppercase leading-tight">{formatProductNameForCustomer(it.name)}</h4><p className="text-emerald-600 font-black">Kz {(it.price * it.quantity).toLocaleString()}</p></div>
+                                    <div className="flex-1"><h4 className="font-bold text-gray-800 text-sm">{formatProductNameForCustomer(it.name)}</h4><p className="text-emerald-600 font-black">Kz {(it.price * it.quantity).toLocaleString()}</p></div>
                                     <div className="flex items-center gap-3 bg-gray-50 p-2 rounded-2xl border">
-                                        <button disabled={isProcessing} onClick={() => updateQuantity(it.id, -1)} className="w-8 h-8 bg-white rounded-xl shadow-sm font-black hover:bg-gray-100">-</button>
-                                        <span className="font-black text-sm">{it.quantity}</span>
-                                        <button disabled={isProcessing} onClick={() => updateQuantity(it.id, 1)} className="w-8 h-8 bg-white rounded-xl shadow-sm font-black hover:bg-gray-100">+</button>
+                                        <button disabled={isProcessing} onClick={() => updateQuantity(it.id, -1)} className="w-8 h-8 bg-white rounded-xl shadow-sm font-black">-</button>
+                                        <span className="font-black">{it.quantity}</span>
+                                        <button disabled={isProcessing} onClick={() => updateQuantity(it.id, 1)} className="w-8 h-8 bg-white rounded-xl shadow-sm font-black">+</button>
                                     </div>
                                 </div>
                             ))}
@@ -467,7 +455,7 @@ export const CartView = ({ items, pharmacies, updateQuantity, onCheckout, userAd
                     </div>
 
                     <div className="bg-emerald-900 text-white p-8 rounded-[40px] shadow-2xl space-y-6 h-fit sticky top-24">
-                        <h3 className="font-black text-xl border-b border-white/10 pb-4">Resumo</h3>
+                        <h3 className="font-black text-xl border-b border-white/10 pb-4">Resumo da Compra</h3>
                         <div className="flex gap-2 p-1 bg-white/10 rounded-2xl">
                             <button 
                                 onClick={() => setType('DELIVERY')} 
@@ -482,19 +470,19 @@ export const CartView = ({ items, pharmacies, updateQuantity, onCheckout, userAd
                         {!pharm?.deliveryActive && (
                             <div className="bg-orange-500/20 p-4 rounded-2xl border border-orange-500/30 flex items-start gap-3">
                                 <AlertCircle size={18} className="text-orange-400 shrink-0 mt-0.5" />
-                                <p className="text-[10px] font-bold text-orange-200 leading-tight">Entrega indisponível para esta farmácia no momento.</p>
+                                <p className="text-[10px] font-bold text-orange-200 leading-tight">Esta farmácia desativou temporariamente o serviço de entregas. Por favor, levante o seu pedido na loja.</p>
                             </div>
                         )}
 
-                        <div className="space-y-2 pt-4 border-t border-white/10">
-                            <div className="flex justify-between text-emerald-200 text-[10px] uppercase font-bold"><span>Itens</span><span>Kz {sub.toLocaleString()}</span></div>
-                            <div className="flex justify-between text-emerald-200 text-[10px] uppercase font-bold"><span>Taxa</span><span>Kz {fee.toLocaleString()}</span></div>
-                            <div className="flex justify-between items-center pt-6 text-3xl font-black"><span>Total</span><span>Kz {total.toLocaleString()}</span></div>
+                        <div className="space-y-2 pt-4">
+                            <div className="flex justify-between text-emerald-200 text-xs uppercase font-bold"><span>Medicamentos ({items.length})</span><span>Kz {sub.toLocaleString()}</span></div>
+                            <div className="flex justify-between text-emerald-200 text-xs uppercase font-bold"><span>Taxa de Entrega</span><span>Kz {fee.toLocaleString()}</span></div>
+                            <div className="flex justify-between items-center pt-6 text-3xl font-black border-t border-white/10"><span>Total</span><span>Kz {total.toLocaleString()}</span></div>
                         </div>
-                        <Button onClick={handleConfirmCheckout} disabled={isProcessing || (type === 'DELIVERY' && !currentAddress)} className="w-full py-6 bg-emerald-500 hover:bg-emerald-400 rounded-[24px] font-black text-xl shadow-2xl active:scale-95 transition-all">
-                            {isProcessing ? <Loader2 className="animate-spin" /> : "Fazer Pedido"}
+                        <Button onClick={handleConfirmCheckout} disabled={isProcessing || (type === 'DELIVERY' && !currentAddress)} className="w-full py-6 bg-emerald-500 hover:bg-emerald-400 rounded-[24px] font-black text-xl shadow-2xl shadow-emerald-500/20 active:scale-95 transition-all">
+                            {isProcessing ? <Loader2 className="animate-spin" /> : "Confirmar Pedido"}
                         </Button>
-                        <p className="text-[9px] text-center text-emerald-400 font-bold uppercase tracking-widest opacity-60">Pagamento na Entrega (TPA / DINHEIRO)</p>
+                        <p className="text-[9px] text-center text-emerald-400 font-bold uppercase tracking-widest opacity-60">Pagamento no ato da entrega</p>
                     </div>
                 </div>
             )}

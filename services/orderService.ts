@@ -192,6 +192,7 @@ export const acceptQuoteAndCreateOrder = async (
         // AUTONOMIA TOTAL: O pedido é criado com os itens snapshots da cotação.
         // Se o ID for 'rx-...', o trigger do banco apenas ignorará o desconto de stock.
         const orderPayload = {
+            customer_id: customer.id,
             customer_name: customer.name,
             customer_phone: customer.phone,
             pharmacy_id: quote.pharmacyId,
@@ -225,11 +226,13 @@ export const acceptQuoteAndCreateOrder = async (
 
 export const createOrder = async (order: Omit<Order, 'id' | 'date'>): Promise<{ success: boolean; error?: string }> => {
   try {
-    const { error } = await supabase.from('orders').insert([{
+    const payload: Record<string, unknown> = {
       customer_name: order.customerName, customer_phone: order.customerPhone, items: order.items,
       total: order.total, status: order.status, type: order.type, pharmacy_id: order.pharmacyId,
       address: order.address, commission_amount: order.total * 0.1, commission_status: 'PENDING'
-    }]);
+    };
+    if (order.customerId) payload.customer_id = order.customerId;
+    const { error } = await supabase.from('orders').insert([payload]);
     return { success: !error };
   } catch { return { success: false, error: "Falha ao fechar pedido." }; }
 };
@@ -239,17 +242,18 @@ export const updateOrderStatus = async (orderId: string, status: OrderStatus): P
     return !error;
 };
 
-export const fetchOrders = async (pharmacyId?: string): Promise<Order[]> => {
+export const fetchOrders = async (pharmacyId?: string, customerId?: string): Promise<Order[]> => {
     const res = await safeQuery(async () => {
         let query = supabase.from('orders').select('*');
         if (pharmacyId) query = query.eq('pharmacy_id', pharmacyId);
+        if (customerId) query = query.eq('customer_id', customerId);
         return query.order('created_at', { ascending: false });
     });
     return (res?.data || []).map((o: any) => ({
-        id: o.id, customerName: o.customer_name, customerPhone: o.customer_phone, 
-        items: safeJsonParse(o.items), total: Number(o.total), status: o.status, 
-        date: new Date(o.created_at).toLocaleString('pt-AO'), type: o.type, 
-        pharmacyId: o.pharmacy_id, address: o.address, 
+        id: o.id, customerId: o.customer_id, customerName: o.customer_name, customerPhone: o.customer_phone,
+        items: safeJsonParse(o.items), total: Number(o.total), status: o.status,
+        date: new Date(o.created_at).toLocaleString('pt-AO'), type: o.type,
+        pharmacyId: o.pharmacy_id, address: o.address,
         commissionAmount: Number(o.commission_amount), commissionStatus: o.commission_status
     }));
 };

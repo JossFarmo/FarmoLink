@@ -1,8 +1,6 @@
 
 import { supabase } from './supabaseClient';
 import { playSound } from './soundService';
-// Import RestoreOptions from central types
-import { RestoreOptions } from '../types';
 
 // Definição de todos os grupos de dados para o backup
 interface FullBackupData {
@@ -22,6 +20,17 @@ interface FullBackupData {
         carousel_slides: any[];
         partners: any[];
     }
+}
+
+export interface RestoreOptions {
+    config: boolean;      // Banners e Parceiros
+    users: boolean;       // Perfis
+    pharmacies: boolean;  // Farmácias
+    catalog: boolean;     // Catálogo Global
+    inventory: boolean;   // Stock das lojas
+    orders: boolean;      // Pedidos
+    prescriptions: boolean; // Receitas e Orçamentos
+    support: boolean;     // SAC e Notificações
 }
 
 /**

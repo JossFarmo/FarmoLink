@@ -73,17 +73,18 @@ const OrderTimeline = ({ status, type }: { status: string, type: 'DELIVERY' | 'P
     );
 };
 
-export const CustomerOrdersView = ({ 
-    orders, pharmacies, onRefresh, onAddToCart, onNavigate 
-}: { 
-    orders: Order[], pharmacies: Pharmacy[], onRefresh: () => void, onAddToCart: (p: Product) => void, onNavigate: (page: string) => void 
+export const CustomerOrdersView = ({
+    orders, pharmacies, customerId, onRefresh, onAddToCart, onNavigate
+}: {
+    orders: Order[], pharmacies: Pharmacy[], customerId?: string, onRefresh: () => void, onAddToCart: (p: Product) => void, onNavigate: (page: string) => void
 }) => {
-    
-    // ATUALIZAÇÃO EM TEMPO REAL PARA PEDIDOS
+
+    // ATUALIZAÇÃO EM TEMPO REAL PARA PEDIDOS (apenas do próprio utente)
     useEffect(() => {
-        const channel = supabase.channel('customer-orders-live')
-            .on('postgres_changes', 
-                { event: '*', schema: 'public', table: 'orders' }, 
+        if (!customerId) return;
+        const channel = supabase.channel(`customer-orders-live-${customerId}`)
+            .on('postgres_changes',
+                { event: '*', schema: 'public', table: 'orders', filter: `customer_id=eq.${customerId}` },
                 (payload) => {
                     if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
                         if (payload.eventType === 'UPDATE') playSound('notification');
@@ -94,7 +95,7 @@ export const CustomerOrdersView = ({
             .subscribe();
 
         return () => { supabase.removeChannel(channel); };
-    }, []);
+    }, [customerId, onRefresh]);
 
     const handleReorder = (order: Order) => {
         if (!confirm("Adicionar todos os itens deste pedido ao carrinho?")) return;

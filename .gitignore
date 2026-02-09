@@ -1,24 +1,25 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+## Node
+node_modules/
 
-node_modules
-dist
-dist-ssr
-*.local
+## Env
+.env
+.env.*
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+## Build
+dist/
+build/
+.vite/
+
+## Android/Gradle
+android/
+android/app/build/
+
+## IDE
+.vscode/
+.idea/
+
+## Misc
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+npm-debug.log
+yarn-error.log
+package-lock.json

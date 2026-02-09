@@ -21,40 +21,6 @@ export type CommissionStatus = 'PENDING' | 'WAITING_APPROVAL' | 'PAID';
 
 export type ProductUnitType = 'Caixa' | 'Lâmina' | 'Frasco' | 'Unidade' | 'Tubo' | 'Saqueta';
 
-export interface FAQItem {
-  id: string;
-  question: string;
-  answer: string;
-  order: number;
-  active: boolean;
-}
-
-export interface SystemContent {
-  id: string;
-  title: string;
-  subtitle?: string;
-  content?: string;
-  mission_text?: string;
-  innovation_text?: string;
-  val_transparency?: string;
-  val_security?: string;
-  val_ethics?: string;
-  val_accessibility?: string;
-  partners_count_text?: string;
-  footer_text?: string;
-}
-
-export interface RestoreOptions {
-    config: boolean;      
-    users: boolean;       
-    pharmacies: boolean;  
-    catalog: boolean;     
-    inventory: boolean;   
-    orders: boolean;      
-    prescriptions: boolean; 
-    support: boolean;     
-}
-
 export interface User {
   id: string;
   name: string;
@@ -109,7 +75,7 @@ export interface Product {
   globalProductId?: string;
   isPromotion?: boolean;
   discountPrice?: number;
-  unitType?: ProductUnitType; 
+  unitType?: ProductUnitType; // NOVO CAMPO: Unidade de Venda (Lâmina, Caixa, etc)
 }
 
 export interface CartItem extends Product {
@@ -118,6 +84,7 @@ export interface CartItem extends Product {
 
 export interface Order {
   id: string;
+  customerId?: string; // ID do utente (profile) — usado para isolar pedidos por cliente
   customerName: string;
   customerPhone?: string;
   items: CartItem[];
@@ -172,7 +139,7 @@ export interface QuotedItem {
   available: boolean;
   isMatched?: boolean;
   unitType?: string; 
-  productId?: string; 
+  productId?: string; // CAMPO CRÍTICO: ID Real do produto para baixar stock
 }
 
 export interface Notification {

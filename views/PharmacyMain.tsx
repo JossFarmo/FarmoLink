@@ -9,7 +9,7 @@ import {
 import { supabase } from '../services/supabaseClient';
 import { 
     Clock, Package, Star, RefreshCw, Truck, Search, 
-    CheckCircle2, Loader2, Bell, Check, X, Phone, BrainCircuit
+    CheckCircle2, Loader2, Bell, Check, X, Phone, BrainCircuit, MapPin, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { playSound } from '../services/soundService';
 
@@ -178,6 +178,7 @@ export const PharmacyOrdersModule = ({ pharmacyId, onUpdate }: { pharmacyId: str
     const [orders, setOrders] = useState<Order[]>([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'PENDING' | 'HISTORY'>('PENDING');
+    const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
 
     const load = async () => { 
         if (!pharmacyId) return;
@@ -213,6 +214,8 @@ export const PharmacyOrdersModule = ({ pharmacyId, onUpdate }: { pharmacyId: str
         return activeTab === 'PENDING' ? isP : !isP;
     });
 
+    const itemsList = (o: Order) => Array.isArray(o.items) ? o.items : [];
+
     return (
         <div className="space-y-6 animate-fade-in pb-20">
             <div className="flex justify-between items-center bg-white p-6 rounded-[32px] border border-gray-100 shadow-sm">
@@ -229,39 +232,101 @@ export const PharmacyOrdersModule = ({ pharmacyId, onUpdate }: { pharmacyId: str
                 <div className="overflow-x-auto">
                     <table className="w-full text-left min-w-[600px]">
                         <thead className="bg-gray-50 border-b text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                            <tr><th className="p-5">CÓDIGO</th><th className="p-5">CLIENTE</th><th className="p-5 text-right">TOTAL</th><th className="p-5 text-center">ESTADO</th><th className="p-5 text-right">ACÇÃO</th></tr>
+                            <tr>
+                                <th className="p-5 w-10"></th>
+                                <th className="p-5">CÓDIGO</th>
+                                <th className="p-5">CLIENTE</th>
+                                <th className="p-5">ITENS</th>
+                                <th className="p-5 text-right">TOTAL</th>
+                                <th className="p-5 text-center">ESTADO</th>
+                                <th className="p-5 text-right">ACÇÃO</th>
+                            </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
                             {list.map(o => {
                                 const act = getAction(o);
+                                const items = itemsList(o);
+                                const isExpanded = expandedOrderId === o.id;
                                 return (
-                                    <tr key={o.id} className="hover:bg-gray-50/50 transition-colors">
-                                        <td className="p-5">
-                                            <p className="text-[10px] font-black text-gray-300">#{o.id.slice(0,6).toUpperCase()}</p>
-                                            <p className="text-xs font-bold text-gray-700">{o.date.split(',')[1]}</p>
-                                        </td>
-                                        <td className="p-5">
-                                            <div className="flex items-center gap-2">
-                                                <p className="text-xs font-black text-gray-800">{o.customerName}</p>
-                                                {o.customerPhone && (
-                                                    <a href={`tel:${o.customerPhone}`} className="p-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100" title="Ligar para Cliente">
-                                                        <Phone size={12}/>
-                                                    </a>
-                                                )}
-                                            </div>
-                                            <p className="text-[9px] text-gray-400 font-bold uppercase tracking-tighter">{o.type}</p>
-                                        </td>
-                                        <td className="p-5 text-right font-black text-emerald-600 text-xs">Kz {o.total.toLocaleString()}</td>
-                                        <td className="p-5 text-center"><Badge color={o.status === OrderStatus.COMPLETED ? 'green' : 'yellow'}>{o.status.toUpperCase()}</Badge></td>
-                                        <td className="p-5 text-right">
-                                            {act && (
-                                                <div className="flex justify-end gap-2">
-                                                    <button onClick={() => handleAction(o.id, act.next)} className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase shadow-sm ${act.color}`}>{act.label}</button>
-                                                    {o.status === OrderStatus.PENDING && <button onClick={() => handleAction(o.id, OrderStatus.REJECTED)} className="p-2 bg-red-50 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"><X size={16}/></button>}
+                                    <React.Fragment key={o.id}>
+                                        <tr 
+                                            className="hover:bg-gray-50/50 transition-colors"
+                                            onClick={() => setExpandedOrderId(isExpanded ? null : o.id)}
+                                        >
+                                            <td className="p-3 pl-5 text-gray-400">
+                                                <button type="button" className="p-1 rounded hover:bg-gray-100" onClick={(e) => { e.stopPropagation(); setExpandedOrderId(isExpanded ? null : o.id); }} aria-label={isExpanded ? 'Fechar' : 'Ver itens'}>
+                                                    {isExpanded ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}
+                                                </button>
+                                            </td>
+                                            <td className="p-5">
+                                                <p className="text-[10px] font-black text-gray-300">#{o.id.slice(0,6).toUpperCase()}</p>
+                                                <p className="text-xs font-bold text-gray-700">{o.date.split(',')[1]}</p>
+                                            </td>
+                                            <td className="p-5">
+                                                <div className="flex items-center gap-2">
+                                                    <p className="text-xs font-black text-gray-800">{o.customerName}</p>
+                                                    {o.customerPhone && (
+                                                        <a href={`tel:${o.customerPhone}`} className="p-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100" title="Ligar para Cliente" onClick={(e) => e.stopPropagation()}>
+                                                            <Phone size={12}/>
+                                                        </a>
+                                                    )}
                                                 </div>
-                                            )}
-                                        </td>
-                                    </tr>
+                                                <p className="text-[9px] text-gray-400 font-bold uppercase tracking-tighter">{o.type === 'DELIVERY' ? 'Entrega' : 'Levantamento'}</p>
+                                            </td>
+                                            <td className="p-5">
+                                                <span className="text-xs font-bold text-gray-600">{items.length} {items.length === 1 ? 'item' : 'itens'}</span>
+                                            </td>
+                                            <td className="p-5 text-right font-black text-emerald-600 text-xs">Kz {o.total.toLocaleString()}</td>
+                                            <td className="p-5 text-center" onClick={(e) => e.stopPropagation()}><Badge color={o.status === OrderStatus.COMPLETED ? 'green' : 'yellow'}>{o.status.toUpperCase()}</Badge></td>
+                                            <td className="p-5 text-right" onClick={(e) => e.stopPropagation()}>
+                                                {act && (
+                                                    <div className="flex justify-end gap-2">
+                                                        <button onClick={() => handleAction(o.id, act.next)} className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase shadow-sm ${act.color}`}>{act.label}</button>
+                                                        {o.status === OrderStatus.PENDING && <button onClick={() => handleAction(o.id, OrderStatus.REJECTED)} className="p-2 bg-red-50 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"><X size={16}/></button>}
+                                                    </div>
+                                                )}
+                                            </td>
+                                        </tr>
+                                        {isExpanded && (
+                                            <tr className="bg-gray-50/80">
+                                                <td colSpan={7} className="p-0">
+                                                    <div className="px-5 pb-5 pt-1 border-t border-gray-100">
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                            <div>
+                                                                <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">Produtos do pedido</h4>
+                                                                {items.length > 0 ? (
+                                                                    <ul className="space-y-2 bg-white rounded-xl border border-gray-100 p-4">
+                                                                        {items.map((item, idx) => (
+                                                                            <li key={idx} className="flex justify-between items-start text-xs border-b border-gray-50 last:border-0 pb-2 last:pb-0">
+                                                                                <span className="font-medium text-gray-800">{item.name}</span>
+                                                                                <span className="text-gray-600 shrink-0 ml-2">{item.quantity} × Kz {(Number(item.price) || 0).toLocaleString()} = Kz {((item.quantity || 1) * (Number(item.price) || 0)).toLocaleString()}</span>
+                                                                            </li>
+                                                                        ))}
+                                                                    </ul>
+                                                                ) : (
+                                                                    <p className="text-xs text-gray-400 italic">Nenhum item listado.</p>
+                                                                )}
+                                                            </div>
+                                                            <div>
+                                                                <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">Dados do utente</h4>
+                                                                <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-2">
+                                                                    <p className="text-xs text-gray-700"><span className="font-bold text-gray-500">Nome:</span> {o.customerName}</p>
+                                                                    {o.customerPhone && <p className="text-xs text-gray-700"><span className="font-bold text-gray-500">Telefone:</span> <a href={`tel:${o.customerPhone}`} className="text-blue-600 font-bold">{o.customerPhone}</a></p>}
+                                                                    {o.type === 'DELIVERY' && o.address && (
+                                                                        <p className="text-xs text-gray-700 flex items-start gap-1">
+                                                                            <MapPin size={14} className="shrink-0 mt-0.5 text-gray-400"/>
+                                                                            <span><span className="font-bold text-gray-500">Endereço:</span> {o.address}</span>
+                                                                        </p>
+                                                                    )}
+                                                                    {o.type === 'PICKUP' && <p className="text-xs text-emerald-600 font-bold">Levantamento na loja</p>}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </React.Fragment>
                                 );
                             })}
                         </tbody>
